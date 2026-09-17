@@ -361,9 +361,30 @@ jobs:
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          name: Silo ${{ needs.meta.outputs.version }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: dist/*
+      # `gh` streams the assets one by one (no per-request header timeout on
+      # 300 MB uploads, unlike the marketplace release actions) and the step is
+      # safe to re-run: an existing release is reused, assets are overwritten.
+      - name: Publish release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          NAME: Silo ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -la
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --draft --title "$NAME" --generate-notes
+          fi
+          for file in *; do
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$file" --clobber; then
+                echo "uploaded $file"; break
+              fi
+              echo "::warning::upload of $file failed (attempt $attempt)"; sleep 15
+              [ "$attempt" = 3 ] && exit 1
+            done
+          done
+          gh release edit "$TAG" --draft=false
+          gh release view "$TAG"
