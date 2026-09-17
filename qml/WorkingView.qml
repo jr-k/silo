@@ -27,6 +27,16 @@ Item {
             tabsModel.closeTab(tabsModel.currentIndex)
     }
 
+    // Reloads the web and file tabs of the current workspace that have been
+    // loaded already (lazily restored ones load fresh on first show anyway).
+    function reloadAll() {
+        for (var i = 0; i < root.tabCount; ++i) {
+            var view = root.viewAt(i)
+            if (view && view.loaded && view.kind !== "ssh")
+                view.reload()
+        }
+    }
+
     // Keep tabs consistent with the tree: renames update titles/urls, deletions close tabs.
     function syncTabs() {
         // While a workspace switch is in flight the tabs still belong to the previous one.
@@ -199,9 +209,23 @@ Item {
                 anchors.bottomMargin: 2
             }
 
+            // Reload every loaded page of the workspace (web pages and files;
+            // terminals are left alone, a reload would kill their shell)
+            IconButton {
+                id: refreshAllButton
+                anchors.left: sidebarToggle.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                iconName: "fluent-arrow-clockwise-20-regular"
+                iconSize: 18
+                enabled: root.tabCount > 0
+                tooltip: "Reload all tabs"
+                onClicked: root.reloadAll()
+            }
+
             ListView {
                 id: tabStrip
-                anchors.left: sidebarToggle.right
+                anchors.left: refreshAllButton.right
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom

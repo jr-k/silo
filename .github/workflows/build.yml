@@ -1,6 +1,7 @@
 # Builds Silo for macOS (universal DMG), Windows (x64 installer + portable zip)
-# and Linux (x86_64 AppImage). Pushing a `vX.Y.Z` tag additionally publishes a
-# GitHub Release with the three artifacts.
+# and Linux (x86_64 AppImage) when a `vX.Y.Z` tag is pushed, and publishes a
+# GitHub Release with the three artifacts. Pull requests and manual runs build
+# too (no release); pushes to master alone do nothing.
 #
 # Signing is opportunistic: each step runs only when its secrets are present, so
 # the workflow also works on forks and pull requests (unsigned builds).
@@ -17,13 +18,11 @@
 
 name: Build
 
+# Plain pushes to master do not build: only `vX.Y.Z` tags (release), pull
+# requests and manual runs do.
 on:
   push:
-    branches: [master]
     tags: ['v*']
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
   pull_request:
     paths-ignore:
       - 'docs/**'
