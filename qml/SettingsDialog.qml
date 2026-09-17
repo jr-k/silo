@@ -807,10 +807,12 @@ SiloDialog {
                                 spacing: 16
                                 Image {
                                     source: "qrc:/app/logo-512.png"
-                                    sourceSize: Qt.size(56, 56)
+                                    sourceSize: Qt.size(56 * Screen.devicePixelRatio, 56 * Screen.devicePixelRatio)
                                     Layout.preferredWidth: 56
                                     Layout.preferredHeight: 56
+                                    fillMode: Image.PreserveAspectFit
                                     smooth: true
+                                    mipmap: true
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true

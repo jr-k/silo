@@ -378,7 +378,14 @@ jobs:
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --draft --title "$NAME" --generate-notes
           fi
-          RELEASE_ID="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq .id)"
+          # The "release by tag" endpoint can return 404 for a newly-created
+          # draft. Listing releases includes drafts immediately.
+          RELEASE_ID="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)"
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::could not resolve the draft release for $TAG"
+            exit 1
+          fi
           UPLOAD_URL="https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets"
           for file in *; do
             asset_id="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" \
