@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Terminal</title>
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000; }
+  #terminal { position: absolute; inset: 0; padding: 8px 0 4px 10px; box-sizing: border-box; }
+  .xterm .xterm-viewport { overflow-y: auto !important; }
+  .xterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+  .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(128,128,128,.4); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="terminal"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script>
+(function () {
+  const term = new Terminal({
+    cursorBlink: true,
+    allowProposedApi: true,
+    scrollback: 5000,
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+    lineHeight: 1.15,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('terminal'));
+
+  const decodeBase64 = (b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  };
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    document.body.style.background = theme.background || '#000';
+    term.options.theme = {
+      background: theme.background,
+      foreground: theme.foreground,
+      cursor: theme.cursor || theme.foreground,
+      cursorAccent: theme.background,
+      selectionBackground: theme.selection,
+    };
+    if (theme.fontSize) term.options.fontSize = theme.fontSize;
+    if (theme.fontFamily) term.options.fontFamily = theme.fontFamily;
+    fit.fit();
+  }
+
+  new QWebChannel(qt.webChannelTransport, function (channel) {
+    const session = channel.objects.session;
+    applyTheme(session.theme);
+    session.themeChanged.connect(() => applyTheme(session.theme));
+
+    session.output.connect((b64) => term.write(decodeBase64(b64)));
+    term.onData((data) => session.write(data));
+    term.onBinary((data) => session.write(data));
+
+    let resizeTimer = null;
+    const syncSize = () => {
+      fit.fit();
+      session.resize(term.cols, term.rows);
+    };
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(syncSize, 60);
+    });
+
+    fit.fit();
+    session.attach(term.cols, term.rows);
+    term.focus();
+    window.addEventListener('focus', () => term.focus());
+    document.addEventListener('mousedown', () => term.focus());
+  });
+})();
+</script>
+</body>
+</html>

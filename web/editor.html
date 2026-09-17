@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Editor</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg, #0d1117); }
+  #editor { position: absolute; inset: 0; }
+  .ace_editor { font: 13px/1.55 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace !important; }
+  /* Blend the theme into the app surface colours */
+  .ace_editor, .ace_editor .ace_gutter { background: var(--bg, #0d1117) !important; }
+  .ace_editor .ace_gutter { color: var(--gutter, #6e7681) !important; border-right: 1px solid var(--line, rgba(110,118,129,.25)); }
+  .ace_editor .ace_gutter-active-line { background: var(--line, rgba(110,118,129,.15)) !important; }
+  .ace_editor .ace_marker-layer .ace_active-line { background: var(--line, rgba(110,118,129,.12)) !important; }
+  .ace_editor .ace_print-margin { display: none; }
+  .ace_editor .ace_scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
+  .ace_editor .ace_scrollbar::-webkit-scrollbar-thumb { background: rgba(128,128,128,.35); border-radius: 5px; }
+  .ace_editor .ace_search { background: var(--bg, #0d1117); border-color: var(--line, rgba(110,118,129,.4)); color: inherit; }
+  .ace_editor .ace_search_field { background: transparent; color: inherit; border-color: var(--line, rgba(110,118,129,.4)); }
+  .ace_editor .ace_searchbtn, .ace_editor .ace_replacebtn { background: transparent; color: inherit; border-color: var(--line, rgba(110,118,129,.4)); }
+</style>
+</head>
+<body>
+<div id="editor"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="vendor/ace/ace.js"></script>
+<script src="vendor/ace/ext-searchbox.js"></script>
+<script>
+(function () {
+  // highlight.js language ids (FileInspector::languageFor) -> Ace modes
+  const MODES = {
+    json: 'json', yaml: 'yaml', javascript: 'javascript', typescript: 'typescript', php: 'php',
+    python: 'python', ruby: 'ruby', go: 'golang', rust: 'rust', java: 'java', kotlin: 'kotlin',
+    swift: 'swift', c: 'c_cpp', cpp: 'c_cpp', objectivec: 'objectivec', csharp: 'csharp', bash: 'sh',
+    powershell: 'powershell', sql: 'sql', xml: 'xml', html: 'html', css: 'css', scss: 'scss', less: 'less',
+    markdown: 'markdown', ini: 'ini', toml: 'toml', dockerfile: 'dockerfile', makefile: 'makefile',
+    cmake: 'text', gradle: 'groovy', lua: 'lua', perl: 'perl', r: 'r', dart: 'dart', scala: 'scala',
+    graphql: 'graphqlschema', protobuf: 'protobuf', diff: 'diff', plaintext: 'text',
+  };
+
+  ace.config.set('basePath', 'vendor/ace');
+  const editor = ace.edit('editor', {
+    useWorker: false,
+    showPrintMargin: false,
+    fontSize: 13,
+    tabSize: 4,
+    useSoftTabs: true,
+    wrap: false,
+    highlightActiveLine: true,
+    scrollPastEnd: 0.3,
+    animatedScroll: false,
+  });
+  editor.session.setNewLineMode('auto');
+  editor.$blockScrolling = Infinity;
+
+  let bridge = null;
+  let loading = false;
+  let timer = null;
+  let dirty = false;
+
+  function pushChanges() {
+    timer = null;
+    if (!bridge || !dirty) return;
+    dirty = false;
+    bridge.textEdited(editor.session.getValue());
+  }
+
+  editor.session.on('change', () => {
+    if (loading || editor.getReadOnly()) return;
+    dirty = true;
+    if (bridge) bridge.notifyDirty();
+    clearTimeout(timer);
+    timer = setTimeout(pushChanges, 350);
+  });
+  // Flush right away when the editor loses focus (tab switch, click elsewhere).
+  editor.on('blur', () => { if (dirty) { clearTimeout(timer); pushChanges(); } });
+
+  window.setTheme = function (dark, bg, fg, gutter, line) {
+    editor.setTheme(dark ? 'ace/theme/tomorrow_night' : 'ace/theme/github');
+    const root = document.documentElement.style;
+    root.setProperty('--bg', bg || (dark ? '#0d1117' : '#ffffff'));
+    root.setProperty('--fg', fg || (dark ? '#c9d1d9' : '#24292e'));
+    root.setProperty('--gutter', gutter || '#6e7681');
+    root.setProperty('--line', line || 'rgba(110,118,129,.25)');
+  };
+
+  window.setContent = function (text, language, readOnly) {
+    loading = true;
+    clearTimeout(timer);
+    dirty = false;
+    const mode = MODES[language] || 'text';
+    editor.session.setMode('ace/mode/' + mode);
+    // Keep the caret/scroll position on a reload of the same document.
+    const cursor = editor.getCursorPosition();
+    const scroll = editor.session.getScrollTop();
+    const same = editor.session.getValue().length > 0;
+    editor.session.setValue(text);
+    if (same) {
+      editor.moveCursorToPosition(cursor);
+      editor.session.setScrollTop(scroll);
+    }
+    editor.setReadOnly(!!readOnly);
+    editor.renderer.$cursorLayer.element.style.display = readOnly ? 'none' : '';
+    loading = false;
+  };
+
+  window.flushChanges = function () {
+    clearTimeout(timer);
+    pushChanges();
+  };
+
+  window.focusEditor = function () { editor.focus(); };
+
+  new QWebChannel(qt.webChannelTransport, function (channel) {
+    bridge = channel.objects.bridge;
+    bridge.ready();
+    editor.focus();
+  });
+  window.addEventListener('focus', () => editor.focus());
+})();
+</script>
+</body>
+</html>

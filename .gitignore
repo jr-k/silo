@@ -1,0 +1,12 @@
+# Build output
+/build/
+CMakeUserPresets.json
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Local data used when trying the app with SILO_DATA_DIR
+/data/
