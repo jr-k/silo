@@ -134,6 +134,15 @@ void TabsModel::closeTab(int index)
 {
     if (index < 0 || index >= m_tabs.size())
         return;
+    // Remember it for reopenClosed(); a node closed twice is only kept once
+    static constexpr int kMaxClosed = 20;
+    const Tab closing = m_tabs.at(index);
+    m_closed.removeIf([&closing](const ClosedTab &c) { return c.tab.nodeId == closing.nodeId; });
+    m_closed.prepend({closing, index});
+    while (m_closed.size() > kMaxClosed)
+        m_closed.removeLast();
+    emit closedCountChanged();
+
     beginRemoveRows({}, index, index);
     m_tabs.removeAt(index);
     endRemoveRows();
@@ -178,6 +187,37 @@ void TabsModel::updateTab(const QString &nodeId, const QString &title, const QSt
     tab.title = title;
     tab.url = url;
     emit dataChanged(this->index(index), this->index(index));
+}
+
+bool TabsModel::reopenClosed()
+{
+    while (!m_closed.isEmpty()) {
+        const ClosedTab closed = m_closed.takeFirst();
+        emit closedCountChanged();
+        // Already open again (from the tree): just show it
+        const int existing = indexOfNode(closed.tab.nodeId);
+        if (existing >= 0) {
+            setCurrentIndex(existing);
+            return true;
+        }
+        // Item deleted meanwhile: nothing to bring back, try the one before
+        const QVariantMap info = m_store ? m_store->nodeInfo(closed.tab.nodeId) : QVariantMap();
+        if (info.isEmpty() || info.value(QStringLiteral("folder")).toBool())
+            continue;
+        const int index = qBound(0, closed.index, int(m_tabs.size()));
+        beginInsertRows({}, index, index);
+        m_tabs.insert(index, {closed.tab.nodeId, info.value(QStringLiteral("name")).toString(),
+                              info.value(QStringLiteral("url")).toString()});
+        endInsertRows();
+        emit countChanged();
+        if (m_currentIndex >= index) {
+            // Keep the same tab active until we switch below (persist sees a coherent index)
+            ++m_currentIndex;
+        }
+        setCurrentIndex(index);
+        return true;
+    }
+    return false;
 }
 
 void TabsModel::activateNext()

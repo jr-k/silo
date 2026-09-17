@@ -63,12 +63,22 @@ The CSV viewer detects the delimiter, toggles the header row, sorts by column, f
 
 <br>
 
+## Passwords, without an extension
+
+Browser extensions cannot run in an embedded browser, so Silo fills logins itself. The key button in the toolbar (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) lists the logins matching the page and fills the one you pick, 2FA code copied along. Logins come from two places, merged in one list:
+
+- **The Silo vault.** Import the CSV export of any password manager (1Password, Bitwarden, Dashlane, LastPass, KeePass, Chrome, Firefox, Proton Pass, or anything with a password column), or let Silo offer to save a login when you submit it in a tab. Entries are encrypted with XChaCha20-Poly1305; the key sits in the macOS Keychain / Windows Credential Manager / libsecret, or behind a master password (Argon2) if you set one. TOTP codes are generated locally from stored secrets.
+- **Password manager connectors.** Bitwarden, 1Password and Dashlane are queried live through their own CLIs. Silo downloads the CLI into its data folder when it is missing (no admin rights, nothing system-wide), runs the interactive sign-in in an embedded terminal, and keeps session tokens in memory only. Everything is set up from *Settings › Passwords*.
+
+<br>
+
 ## Small things that add up
 
 - Light, dark, or follow the system. Every color is a token, so both themes are first-class.
 - Favicons are fetched and cached for web items; any item or workspace can get an emoji or a Fluent icon instead.
 - Full keyboard navigation in the tree: <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Tab</kbd> to expand or collapse, <kbd>Enter</kbd> to open, <kbd>Space</kbd> to rename, <kbd>Delete</kbd> to remove (with confirmation).
-- <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>B</kbd> hides the sidebar. <kbd>Ctrl</kbd>+<kbd>Tab</kbd> cycles tabs, <kbd>Ctrl</kbd>+<kbd>W</kbd> closes one.
+- <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>B</kbd> hides the sidebar. <kbd>Ctrl</kbd>+<kbd>Tab</kbd> cycles tabs (also <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>→</kbd>/<kbd>←</kbd> on macOS), <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps to one, <kbd>Ctrl</kbd>+<kbd>W</kbd> closes one, <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> reopens the last closed one.
+- Web tabs keep their sessions between launches.
 - No account, no server. Your library is a `library.json` you can read, diff and back up.
 - A workspace exports to a single `.silo.json` (tree, custom icons embedded, SSH passwords only if you ask) and imports back as a new workspace, on any machine.
 
@@ -84,7 +94,7 @@ make run          # configure, build and launch
 
 `make rerun` rebuilds and launches, `make clean` wipes the build directory. Icons and web bundles (xterm.js, Ace) are vendored in `icons/` and `web/vendor/`; `make icons` and `make web-assets` refresh them from the CDN.
 
-Data lives in the platform's application data folder (`library.json`, `session.json`, `secrets.json`). Set `SILO_DATA_DIR` to point somewhere else, which is handy for trying a throwaway library.
+Data lives in the platform's application data folder (`library.json`, `session.json`, `secrets.json`, the encrypted `vault.bin` and the `bin/` folder holding downloaded CLIs). Set `SILO_DATA_DIR` to point somewhere else, which is handy for trying a throwaway library.
 
 <br>
 

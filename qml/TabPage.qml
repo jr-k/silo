@@ -33,6 +33,21 @@ Item {
     function goForward() { if (impl) impl.goForward() }
     function openExternally() { if (impl) impl.openExternally() }
     function showInFolder() { if (impl && impl.showInFolder) impl.showInFolder() }
+    // Web tabs only: fill the page's login form (see WebPage.fillCredentials)
+    readonly property bool canFill: kind === "web" && loaded
+    function fillCredentials(username, password, callback) {
+        if (impl && impl.fillCredentials)
+            impl.fillCredentials(username, password, callback)
+        else if (callback)
+            callback({})
+    }
+    // Web tabs only: keep the 2FA code of a filled login ready for the code step
+    readonly property bool totpRefreshing: impl && impl.totpRefreshing ? true : false
+    function armTotp(credentials) { if (impl && impl.armTotp) impl.armTotp(credentials) }
+    function focusContent() { if (impl) impl.forceActiveFocus() }
+    // Login captured in the page, waiting for the user to save or dismiss it
+    readonly property var pendingCapture: impl && impl.pendingCapture ? impl.pendingCapture : null
+    function clearCapture() { if (impl && impl.clearCapture) impl.clearCapture() }
 
     Loader {
         id: loader

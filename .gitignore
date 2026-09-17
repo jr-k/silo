@@ -1,6 +1,12 @@
 # Build output
 /build/
+/build-*/
 CMakeUserPresets.json
+
+# Packaging output (scripts/package-*.sh, CI)
+/dist/
+/AppDir/
+/.linuxdeploy/
 
 # Editors / OS
 .DS_Store

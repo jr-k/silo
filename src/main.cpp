@@ -9,8 +9,18 @@
 #include <QQmlExpression>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSysInfo>
 #include <QTimer>
+#include <QVariantMap>
+#include <QtWebEngineCore/qtwebenginecoreglobal.h>
 #include <QtWebEngineQuick/QtWebEngineQuick>
+
+#ifndef SILO_VERSION_STRING
+#define SILO_VERSION_STRING "0.0.0"
+#endif
+#ifndef SILO_GIT_SHA
+#define SILO_GIT_SHA ""
+#endif
 
 #include "AppStore.h"
 #include "CsvModel.h"
@@ -20,6 +30,8 @@
 #include "SessionStore.h"
 #include "TabsModel.h"
 #include "TerminalSession.h"
+#include "PasswordManager.h"
+#include "Vault.h"
 #include "ThemeController.h"
 
 // SSH_ASKPASS helper used by TerminalSession for password logins: ssh runs
@@ -45,6 +57,7 @@ int main(int argc, char *argv[])
     QGuiApplication::setApplicationName(QStringLiteral("Silo"));
     QGuiApplication::setOrganizationName(QStringLiteral("Silo"));
     QGuiApplication::setOrganizationDomain(QStringLiteral("silo.app"));
+    QGuiApplication::setApplicationVersion(QStringLiteral(SILO_VERSION_STRING));
     QIcon applicationIcon;
     applicationIcon.addFile(QStringLiteral(":/app/logo-64.png"));
     applicationIcon.addFile(QStringLiteral(":/app/logo-512.png"));
@@ -55,6 +68,8 @@ int main(int argc, char *argv[])
     qmlRegisterType<CsvModel>("Silo.Backend", 1, 0, "CsvModel");
 
     ThemeController themeController;
+    PasswordManager passwordManager;
+    Vault vault;
     AppStore store;
     SessionStore sessionStore;
     TabsHub tabsHub(&store, &sessionStore);
@@ -65,9 +80,22 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("siteicon"), new FaviconProvider(&faviconFetcher));
     engine.rootContext()->setContextProperty(QStringLiteral("appStore"), &store);
     engine.rootContext()->setContextProperty(QStringLiteral("themeController"), &themeController);
+    engine.rootContext()->setContextProperty(QStringLiteral("passwords"), &passwordManager);
+    engine.rootContext()->setContextProperty(QStringLiteral("vault"), &vault);
     engine.rootContext()->setContextProperty(QStringLiteral("tabsHub"), &tabsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("files"), &fileInspector);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionStore"), &sessionStore);
+    // Read-only facts for Settings > About.
+    const QVariantMap appInfo{
+        {QStringLiteral("version"), QGuiApplication::applicationVersion()},
+        {QStringLiteral("commit"), QStringLiteral(SILO_GIT_SHA)},
+        {QStringLiteral("qtVersion"), QString::fromLatin1(qVersion())},
+        {QStringLiteral("chromiumVersion"), QString::fromLatin1(qWebEngineChromiumVersion())},
+        {QStringLiteral("os"), QSysInfo::prettyProductName()},
+        {QStringLiteral("arch"), QSysInfo::currentCpuArchitecture()},
+        {QStringLiteral("repository"), QStringLiteral("https://github.com/jr-k/silo")},
+    };
+    engine.rootContext()->setContextProperty(QStringLiteral("appInfo"), appInfo);
     engine.loadFromModule(QStringLiteral("Silo"), QStringLiteral("Main"));
 
     if (engine.rootObjects().isEmpty())

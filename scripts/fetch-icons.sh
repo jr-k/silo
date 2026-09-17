@@ -86,6 +86,8 @@ fluent:table-20-regular
 fluent:table-24-regular
 fluent:lock-closed-20-regular
 fluent:settings-20-regular
+fluent:lock-open-20-regular
+fluent:chevron-right-20-regular
 fluent:checkbox-checked-20-regular
 fluent:checkbox-unchecked-20-regular
 fluent:table-insert-row-20-regular
@@ -101,6 +103,20 @@ fluent:arrow-export-20-regular
 fluent:arrow-import-20-regular
 fluent:arrow-download-20-regular
 fluent:document-arrow-right-20-regular
+fluent:save-20-regular
+fluent:prohibited-20-regular
+fluent:shield-keyhole-20-regular
+fluent:person-20-regular
+fluent:arrow-sync-20-regular
+fluent:sign-out-20-regular
+fluent:plug-connected-20-regular
+fluent:plug-disconnected-20-regular
+fluent:more-horizontal-20-regular
+fluent:vault-20-regular
+fluent:cloud-arrow-down-20-regular
+fluent:info-20-regular
+fluent:error-circle-20-regular
+fluent:arrow-undo-20-regular
 "
 
 for icon in $ICONS; do

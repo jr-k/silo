@@ -11,6 +11,14 @@ IconButton {
     tooltip: "Settings"
     onClicked: settingsDialog.open()
 
+    Connections {
+        target: Session
+        function onSettingsRequested(section) {
+            settingsDialog.section = section
+            settingsDialog.open()
+        }
+    }
+
     background: Rectangle {
         radius: height / 2
         color: control.down ? Theme.pressed : control.hovered ? Theme.hover : Theme.controlBg

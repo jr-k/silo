@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Silo
+Comment=Everything a project needs, one window
+Exec=Silo %U
+Icon=silo
+Categories=Utility;Development;
+Terminal=false
+StartupWMClass=Silo

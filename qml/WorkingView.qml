@@ -53,8 +53,51 @@ Item {
 
     Shortcut { enabled: root.visible; sequences: [StandardKey.Close]; onActivated: root.closeCurrent() }
     Shortcut { enabled: root.visible; sequences: [StandardKey.Refresh]; onActivated: if (root.currentView) root.currentView.reload() }
-    Shortcut { enabled: root.visible && !!root.tabsModel; sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: tabsModel.activateNext() }
-    Shortcut { enabled: root.visible && !!root.tabsModel; sequences: ["Ctrl+Shift+Tab", "Ctrl+PgUp"]; onActivated: tabsModel.activatePrevious() }
+    // Next / previous tab. In Qt key strings "Ctrl" is ⌘ on macOS (and ⌘Tab
+    // belongs to the system), the physical Control key is "Meta" there; the
+    // browser chords ⌘⌥→/← and ⌘⇧]/[ are offered as well.
+    Shortcut {
+        enabled: root.visible && !!root.tabsModel
+        sequences: ["Ctrl+Tab", "Meta+Tab", "Ctrl+PgDown", "Ctrl+Alt+Right", "Ctrl+Shift+]"]
+        onActivated: tabsModel.activateNext()
+    }
+    Shortcut {
+        enabled: root.visible && !!root.tabsModel
+        sequences: ["Ctrl+Shift+Tab", "Meta+Shift+Tab", "Ctrl+PgUp", "Ctrl+Alt+Left", "Ctrl+Shift+["]
+        onActivated: tabsModel.activatePrevious()
+    }
+    // Jump to tab 1–8, and to the last one with 9 (browser convention)
+    Repeater {
+        model: 9
+        Item {
+            required property int index
+            Shortcut {
+                enabled: root.visible && !!root.tabsModel
+                sequence: "Ctrl+" + (index + 1)
+                onActivated: {
+                    if (index === 8)
+                        tabsModel.currentIndex = tabsModel.count - 1
+                    else if (index < tabsModel.count)
+                        tabsModel.currentIndex = index
+                }
+            }
+        }
+    }
+    // Reopen the last closed tab (Cmd+Shift+T on macOS), one per press
+    Shortcut { enabled: root.visible && !!root.tabsModel; sequences: ["Ctrl+Shift+T"]; onActivated: tabsModel.reopenClosed() }
+    // Fill login from the password manager (Cmd+Shift+L on macOS)
+    Shortcut { enabled: root.visible && root.canFillLogin; sequences: ["Ctrl+Shift+L"]; onActivated: root.openPasswordPopover() }
+
+    readonly property bool canFillLogin: !!root.currentView && root.currentView.canFill
+    function openPasswordPopover() {
+        if (!canFillLogin)
+            return
+        passwordPopover.parent = fillButton
+        passwordPopover.x = fillButton.width - passwordPopover.width
+        passwordPopover.y = fillButton.height + 6
+        passwordPopover.openFor(root.currentView)
+    }
+    PasswordPopover { id: passwordPopover }
 
     SiloMenu {
         id: tabMenu
@@ -95,6 +138,16 @@ Item {
         SiloMenuItem {
             text: "Close all tabs"
             onTriggered: tabsModel.closeAll()
+        }
+        MenuSeparator {
+            padding: 4
+            contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
+        }
+        SiloMenuItem {
+            text: "Reopen closed tab"
+            iconName: "fluent-arrow-undo-20-regular"
+            enabled: !!root.tabsModel && root.tabsModel.closedCount > 0
+            onTriggered: tabsModel.reopenClosed()
         }
     }
 
@@ -403,6 +456,15 @@ Item {
                         }
 
                         IconButton {
+                            id: fillButton
+                            visible: parent.isWeb
+                            iconName: "fluent-key-20-regular"
+                            iconSize: 18
+                            tooltip: "Fill login (" + (Qt.platform.os === "osx" ? "⌘⇧L" : "Ctrl+Shift+L") + ")"
+                            enabled: root.canFillLogin
+                            onClicked: root.openPasswordPopover()
+                        }
+                        IconButton {
                             visible: parent.kind === "file"
                             iconName: "fluent-folder-open-20-filled"
                             iconSize: 18
@@ -437,6 +499,12 @@ Item {
                         color: Theme.accent
                         Behavior on width { NumberAnimation { duration: 120 } }
                     }
+                }
+
+                // Offer to save a login submitted in the current tab
+                SavePasswordBanner {
+                    Layout.fillWidth: true
+                    view: root.currentView
                 }
 
                 // Pages: one container per workspace, one TabPage per tab.
@@ -481,6 +549,24 @@ Item {
                                 }
                             }
                         }
+                    }
+
+                    // Pages clip to a rectangle: give the card its bottom radius back
+                    CornerMask {
+                        corner: "bottomLeft"
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: -1
+                        anchors.bottomMargin: -1
+                        z: 10
+                    }
+                    CornerMask {
+                        corner: "bottomRight"
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: -1
+                        anchors.bottomMargin: -1
+                        z: 10
                     }
 
                     // Empty state

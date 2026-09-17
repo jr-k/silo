@@ -18,6 +18,8 @@ class TabsModel final : public QAbstractListModel
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
     Q_PROPERTY(QString currentNodeId READ currentNodeId NOTIFY currentIndexChanged)
     Q_PROPERTY(QString workspaceId READ workspaceId CONSTANT)
+    // Tabs closed during this run, most recent first (for "reopen closed tab")
+    Q_PROPERTY(int closedCount READ closedCount NOTIFY closedCountChanged)
 
 public:
     enum Roles { NodeIdRole = Qt::UserRole + 1, TitleRole, UrlRole };
@@ -53,16 +55,27 @@ public:
     Q_INVOKABLE void updateTab(const QString &nodeId, const QString &title, const QString &url);
     Q_INVOKABLE void activateNext();
     Q_INVOKABLE void activatePrevious();
+    int closedCount() const { return int(m_closed.size()); }
+    // Brings back the most recently closed tab (at its old position) and
+    // activates it. Tabs whose item was deleted since are skipped. Returns
+    // false when there is nothing left to reopen.
+    Q_INVOKABLE bool reopenClosed();
 
 signals:
     void countChanged();
     void currentIndexChanged();
+    void closedCountChanged();
 
 private:
     void persist() const;
     void restore();
 
     QList<Tab> m_tabs;
+    struct ClosedTab {
+        Tab tab;
+        int index;
+    };
+    QList<ClosedTab> m_closed; // most recent first, capped
     int m_currentIndex = -1;
     AppStore *m_store = nullptr;
     SessionStore *m_session = nullptr;

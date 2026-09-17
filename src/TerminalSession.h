@@ -20,6 +20,8 @@ class TerminalSession : public QObject
     Q_PROPERTY(QString authMethod READ authMethod WRITE setAuthMethod NOTIFY configChanged)
     Q_PROPERTY(QString keyPath READ keyPath WRITE setKeyPath NOTIFY configChanged)
     Q_PROPERTY(QString password READ password WRITE setPassword NOTIFY configChanged)
+    // [program, args…]: run this instead of ssh / the login shell (password manager sign-in flows)
+    Q_PROPERTY(QStringList command READ command WRITE setCommand NOTIFY configChanged)
     // Colours/font handed to xterm.js (bg, fg, cursor, selection, fontFamily, fontSize…).
     Q_PROPERTY(QVariantMap theme READ theme WRITE setTheme NOTIFY themeChanged)
 
@@ -34,6 +36,8 @@ public:
     QString authMethod() const { return m_authMethod; }
     QString keyPath() const { return m_keyPath; }
     QString password() const { return m_password; }
+    QStringList command() const { return m_command; }
+    void setCommand(const QStringList &command);
     QVariantMap theme() const { return m_theme; }
     void setHost(const QString &host);
     void setUser(const QString &user);
@@ -68,6 +72,7 @@ private:
     QString m_authMethod;
     QString m_keyPath;
     QString m_password;
+    QStringList m_command;
     QVariantMap m_theme;
     int m_cols = 80;
     int m_rows = 24;

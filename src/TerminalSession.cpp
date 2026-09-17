@@ -73,6 +73,14 @@ void TerminalSession::setPassword(const QString &password)
     emit configChanged();
 }
 
+void TerminalSession::setCommand(const QStringList &command)
+{
+    if (m_command == command)
+        return;
+    m_command = command;
+    emit configChanged();
+}
+
 void TerminalSession::setTheme(const QVariantMap &theme)
 {
     if (m_theme == theme)
@@ -133,6 +141,15 @@ void TerminalSession::start()
     // run with --askpass, prints it (see main.cpp).
     const QByteArray askpass = QCoreApplication::applicationFilePath().toUtf8();
     const QByteArray password = m_password.toUtf8();
+    // Explicit command (e.g. `bw login`): PATH is widened so the CLI finds its helpers.
+    QList<QByteArray> commandArgs;
+    for (const QString &part : m_command)
+        commandArgs.append(part.toUtf8());
+    QList<char *> commandArgv;
+    for (auto &arg : commandArgs)
+        commandArgv.append(arg.data());
+    commandArgv.append(nullptr);
+    const QByteArray widenedPath = QByteArray(getenv("PATH") ? getenv("PATH") : "") + ":/opt/homebrew/bin:/usr/local/bin";
 
     int master = -1;
     const pid_t pid = forkpty(&master, nullptr, nullptr, &size);
@@ -147,7 +164,11 @@ void TerminalSession::start()
         setenv("COLORTERM", "truecolor", 1);
         signal(SIGINT, SIG_DFL);
         signal(SIGPIPE, SIG_DFL);
-        if (m_host.trimmed().isEmpty()) {
+        if (!commandArgs.isEmpty()) {
+            setenv("PATH", widenedPath.constData(), 1);
+            setenv("NO_COLOR", "1", 1);
+            execvp(commandArgv[0], commandArgv.data());
+        } else if (m_host.trimmed().isEmpty()) {
             const char *shell = getenv("SHELL");
             if (!shell || !*shell)
                 shell = "/bin/sh";

@@ -1,0 +1,340 @@
+# Builds Silo for macOS (universal DMG), Windows (x64 installer + portable zip)
+# and Linux (x86_64 AppImage). Pushing a `vX.Y.Z` tag additionally publishes a
+# GitHub Release with the three artifacts.
+#
+# Signing is opportunistic: each step runs only when its secrets are present, so
+# the workflow also works on forks and pull requests (unsigned builds).
+#
+# Secrets (same names as the Electron player pipeline, copy them over):
+#   macOS   APPLE_CSC_LINK                Developer ID Application certificate (.p12, base64 or https URL)
+#           APPLE_CSC_KEY_PASSWORD        password of that .p12
+#           APPLE_ID                      Apple account used for notarization
+#           APPLE_APP_SPECIFIC_PASSWORD   app-specific password for that account
+#           APPLE_TEAM_ID                 10-character team id
+#   Windows AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET   Azure Trusted Signing service principal
+# Repository variables (optional, override the Trusted Signing target):
+#           AZURE_CODESIGN_ENDPOINT, AZURE_CODESIGN_ACCOUNT, AZURE_CODESIGN_PROFILE
+
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  QT_VERSION: 6.11.1
+  QT_MODULES: qtwebengine qtwebchannel qtpositioning qtmultimedia
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Version: `vX.Y.Z` tag => X.Y.Z; anything else => <CMake version>-dev.<sha>.
+  # ---------------------------------------------------------------------------
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      cmake_version: ${{ steps.version.outputs.cmake_version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: version
+        shell: bash
+        run: |
+          CMAKE_VERSION="$(sed -nE 's/^set\(SILO_VERSION "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' CMakeLists.txt)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::tag must look like vX.Y.Z (got v$VERSION)"; exit 1
+            fi
+            CMAKE_VERSION="$VERSION"
+            IS_RELEASE=true
+          else
+            VERSION="${CMAKE_VERSION}-dev.${GITHUB_SHA::7}"
+            IS_RELEASE=false
+          fi
+          {
+            echo "version=$VERSION"
+            echo "cmake_version=$CMAKE_VERSION"
+            echo "is_release=$IS_RELEASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Silo $VERSION (CMake $CMAKE_VERSION, release=$IS_RELEASE)"
+
+  # ---------------------------------------------------------------------------
+  # macOS: universal binary, signed + notarized DMG.
+  # ---------------------------------------------------------------------------
+  macos:
+    name: macOS
+    needs: meta
+    runs-on: macos-latest
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CSC_LINK != '' && secrets.APPLE_CSC_KEY_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          arch: clang_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DSILO_VERSION=${{ needs.meta.outputs.cmake_version }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Import signing certificate
+        if: env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CSC_LINK: ${{ secrets.APPLE_CSC_LINK }}
+          APPLE_CSC_KEY_PASSWORD: ${{ secrets.APPLE_CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT="$RUNNER_TEMP/silo-cert.p12"
+          KEYCHAIN="$RUNNER_TEMP/silo-build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+
+          # Accept the same shapes electron-builder does for CSC_LINK.
+          case "$APPLE_CSC_LINK" in
+            https://*) curl -fsSL -o "$CERT" "$APPLE_CSC_LINK" ;;
+            *)         printf '%s' "${APPLE_CSC_LINK#data:*;base64,}" | base64 --decode > "$CERT" ;;
+          esac
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT" -P "$APPLE_CSC_KEY_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$CERT"
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+                      | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)".*/\1/')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::no 'Developer ID Application' identity found in the imported certificate"; exit 1
+          fi
+          echo "Signing identity: $IDENTITY"
+          echo "MACOS_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "SILO_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Package (macdeployqt, codesign, notarize, DMG)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./scripts/package-macos.sh build "${{ needs.meta.outputs.version }}" dist
+
+      - name: Remove signing keychain
+        if: always() && env.SILO_KEYCHAIN != ''
+        run: security delete-keychain "$SILO_KEYCHAIN" || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: silo-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Windows: x64, Inno Setup installer + portable zip, Azure Trusted Signing.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: Windows
+    needs: meta
+    runs-on: windows-latest
+    env:
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
+      AZURE_CODESIGN_ENDPOINT: ${{ vars.AZURE_CODESIGN_ENDPOINT || 'https://weu.codesigning.azure.net' }}
+      AZURE_CODESIGN_ACCOUNT: ${{ vars.AZURE_CODESIGN_ACCOUNT || 'Obscreen' }}
+      AZURE_CODESIGN_PROFILE: ${{ vars.AZURE_CODESIGN_PROFILE || 'ObscreenPlayer' }}
+      SETUP_NAME: Silo-${{ needs.meta.outputs.version }}-windows-x64-setup
+      PORTABLE_NAME: Silo-${{ needs.meta.outputs.version }}-windows-x64-portable
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          arch: win64_msvc2022_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSILO_VERSION=${{ needs.meta.outputs.cmake_version }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Deploy Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\Silo | Out-Null
+          Copy-Item build\Silo.exe dist\Silo\
+          windeployqt --release --qmldir qml --compiler-runtime dist\Silo\Silo.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Only the executables are signed (Silo.exe, QtWebEngineProcess.exe); Qt's
+      # DLLs stay as shipped. Add "dll" to the filter to sign everything.
+      - name: Sign executables (Azure Trusted Signing)
+        if: env.HAS_AZURE_SIGNING == 'true'
+        uses: azure/trusted-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ env.AZURE_CODESIGN_ENDPOINT }}
+          trusted-signing-account-name: ${{ env.AZURE_CODESIGN_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_CODESIGN_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\Silo
+          files-folder-filter: exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\Silo\* -DestinationPath "dist\$env:PORTABLE_NAME.zip" -CompressionLevel Optimal
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y; }
+          & $iscc `
+            "/DAppVersion=${{ needs.meta.outputs.version }}" `
+            "/DAppSourceDir=${{ github.workspace }}\dist\Silo" `
+            "/DOutputDir=${{ github.workspace }}\dist" `
+            "/DOutputBaseFilename=$env:SETUP_NAME" `
+            packaging\windows\silo.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sign installer (Azure Trusted Signing)
+        if: env.HAS_AZURE_SIGNING == 'true'
+        uses: azure/trusted-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ env.AZURE_CODESIGN_ENDPOINT }}
+          trusted-signing-account-name: ${{ env.AZURE_CODESIGN_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_CODESIGN_PROFILE }}
+          files: ${{ github.workspace }}\dist\${{ env.SETUP_NAME }}.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: silo-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Linux: x86_64 AppImage.
+  # ---------------------------------------------------------------------------
+  linux:
+    name: Linux
+    needs: meta
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libgl1-mesa-dev libegl1 libfontconfig1 libdbus-1-3 libcups2 \
+            libxkbcommon-x11-0 libxkbfile1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libnss3 libnspr4 libasound2t64 libpulse0 libxcomposite1 libxdamage1 libxrandr2 \
+            libxtst6 libgbm1 libdrm2 libxshmfence1 libwayland-client0 libwayland-egl1 \
+            desktop-file-utils file
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSILO_VERSION=${{ needs.meta.outputs.cmake_version }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package (AppImage)
+        run: ./scripts/package-linux.sh build "${{ needs.meta.outputs.version }}" dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: silo-linux
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # GitHub Release on vX.Y.Z tags.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release
+    needs: [meta, macos, windows, linux]
+    if: needs.meta.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: silo-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: Silo ${{ needs.meta.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*

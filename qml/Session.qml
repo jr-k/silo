@@ -27,6 +27,12 @@ QtObject {
         sidebarVisible = !sidebarVisible
     }
 
+    // Opens the settings dialog (owned by the sidebar's cog button) on a section.
+    signal settingsRequested(string section)
+    function openSettings(section) {
+        settingsRequested(section || "general")
+    }
+
     // Internal clipboard for folders / items (ids of the current workspace).
     property var clipboardIds: []
     property string clipboardWorkspaceId: ""

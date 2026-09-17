@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(SiloQt VERSION 1.0.0 LANGUAGES CXX)
+# Overridden by CI from the git tag (-DSILO_VERSION=x.y.z); must stay numeric.
+set(SILO_VERSION "1.0.0" CACHE STRING "Silo version (major.minor.patch)")
+project(SiloQt VERSION ${SILO_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +22,12 @@ qt_add_executable(Silo
     src/FaviconProvider.h
     src/ThemeController.cpp
     src/ThemeController.h
+    src/PasswordManager.cpp
+    src/PasswordManager.h
+    src/Vault.cpp
+    src/Vault.h
+    third_party/monocypher/monocypher.c
+    third_party/monocypher/monocypher.h
     src/TabsModel.cpp
     src/TabsModel.h
     src/SessionStore.cpp
@@ -42,7 +50,7 @@ elseif(WIN32)
     target_sources(Silo PRIVATE icons/logo/silo.rc)
 endif()
 
-set_source_files_properties(qml/Theme.qml qml/DragState.qml qml/Session.qml qml/ItemTypes.qml
+set_source_files_properties(qml/Theme.qml qml/DragState.qml qml/Session.qml qml/ItemTypes.qml qml/WebProfile.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -75,6 +83,9 @@ qt_add_qml_module(Silo
         qml/SiloMenuItem.qml
         qml/SiloDialog.qml
         qml/Badge.qml
+        qml/AccountPicker.qml
+        qml/Spinner.qml
+        qml/CornerMask.qml
         qml/WorkspaceSwitcher.qml
         qml/WorkspaceDialog.qml
         qml/WorkspaceTransfer.qml
@@ -87,6 +98,11 @@ qt_add_qml_module(Silo
         qml/TextEditor.qml
         qml/SettingsButton.qml
         qml/SettingsDialog.qml
+        qml/WebProfile.qml
+        qml/PasswordPopover.qml
+        qml/SavePasswordBanner.qml
+        qml/ConnectorSignInDialog.qml
+        qml/VaultDialog.qml
 )
 
 file(GLOB SILO_ICON_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/icons/*.svg")
@@ -108,12 +124,30 @@ qt_add_resources(Silo "silo_app_icons"
 
 file(GLOB SILO_WEB_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/web/*.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/*.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/vendor/*"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/vendor/ace/*")
 qt_add_resources(Silo "silo_web"
     PREFIX "/web"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/web"
     FILES ${SILO_WEB_FILES}
+)
+
+# Version and commit shown in Settings > About. Scoped to main.cpp so a new
+# commit doesn't trigger a full rebuild.
+find_package(Git QUIET)
+set(SILO_GIT_SHA "")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=7 HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE SILO_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS
+    "SILO_VERSION_STRING=\"${PROJECT_VERSION}\";SILO_GIT_SHA=\"${SILO_GIT_SHA}\""
 )
 
 target_link_libraries(Silo
@@ -128,13 +162,19 @@ target_link_libraries(Silo
         Qt6::WebChannelQuick
         Qt6::Multimedia
 )
+if(WIN32)
+    # Windows Credential Manager (vault key storage)
+    target_link_libraries(Silo PRIVATE advapi32)
+endif()
 
 set_target_properties(Silo PROPERTIES
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "Silo"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "com.jessym.silo"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.jrk.silo"
     MACOSX_BUNDLE_ICON_FILE "logo-1000.icns"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
 )
 
 install(TARGETS Silo
