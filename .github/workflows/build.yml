@@ -391,17 +391,32 @@ jobs:
           fi
           UPLOAD_URL="https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets"
           for file in *; do
-            asset_id="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" \
-              --jq ".[] | select(.name == \"$file\") | .id" | head -1)"
-            [ -z "$asset_id" ] || gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
-            curl --fail-with-body --show-error \
-              --retry 8 --retry-all-errors --retry-delay 20 \
-              --connect-timeout 30 --max-time 1800 \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$file" \
-              "$UPLOAD_URL?name=$file"
-            echo "uploaded $file"
+            uploaded=false
+            for attempt in $(seq 1 9); do
+              # A failed GitHub upload often leaves a same-name asset in
+              # `starter` state. It must be removed before retrying.
+              gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" \
+                --jq ".[] | select(.name == \"$file\") | .id" |
+                while read -r asset_id; do
+                  gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
+                done
+              if curl --http1.1 --fail-with-body --show-error \
+                --connect-timeout 30 --max-time 1800 \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "Expect:" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@$file" \
+                "$UPLOAD_URL?name=$file"; then
+                uploaded=true
+                echo "uploaded $file"
+                break
+              fi
+              echo "::warning::upload of $file failed (attempt $attempt/9)"
+              sleep 20
+            done
+            [ "$uploaded" = true ] || exit 1
           done
           # Publish by immutable ID as tag lookup can still be stale here.
           gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
