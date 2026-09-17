@@ -361,9 +361,10 @@ jobs:
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      # `gh` streams the assets one by one (no per-request header timeout on
-      # 300 MB uploads, unlike the marketplace release actions) and the step is
-      # safe to re-run: an existing release is reused, assets are overwritten.
+      # Upload sequentially with curl so transient uploads.github.com 5xx errors
+      # are retried and a stalled connection cannot block the job indefinitely.
+      # The step is safe to re-run: an existing draft is reused and assets are
+      # replaced by name.
       - name: Publish release
         working-directory: dist
         env:
@@ -377,14 +378,20 @@ jobs:
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --draft --title "$NAME" --generate-notes
           fi
+          RELEASE_ID="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq .id)"
+          UPLOAD_URL="https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets"
           for file in *; do
-            for attempt in 1 2 3; do
-              if gh release upload "$TAG" "$file" --clobber; then
-                echo "uploaded $file"; break
-              fi
-              echo "::warning::upload of $file failed (attempt $attempt)"; sleep 15
-              [ "$attempt" = 3 ] && exit 1
-            done
+            asset_id="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" \
+              --jq ".[] | select(.name == \"$file\") | .id" | head -1)"
+            [ -z "$asset_id" ] || gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
+            curl --fail-with-body --show-error \
+              --retry 8 --retry-all-errors --retry-delay 20 \
+              --connect-timeout 30 --max-time 1800 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$file" \
+              "$UPLOAD_URL?name=$file"
+            echo "uploaded $file"
           done
           gh release edit "$TAG" --draft=false
           gh release view "$TAG"
