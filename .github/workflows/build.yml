@@ -319,9 +319,9 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: linux
           arch: linux_gcc_64
-          # qtwaylandcompositor also carries the Wayland *client* platform plugin
-          # (libqwayland-generic.so), split out of the base package since Qt 6.11.
-          modules: ${{ env.QT_MODULES }} qtwaylandcompositor
+          # qtserialport: linuxdeploy bundles every Qt Positioning plugin (pulled in by
+          # WebEngine) and the NMEA one links against libQt6SerialPort.
+          modules: ${{ env.QT_MODULES }} qtserialport
           cache: true
 
       - name: Configure

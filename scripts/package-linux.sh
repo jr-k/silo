@@ -72,8 +72,9 @@ fi
 export QMAKE
 export QML_SOURCES_PATHS="$ROOT_DIR/qml"
 
-# Bundle the Wayland platform plugins when the Qt install has them (they live in
-# the qtwaylandcompositor addon since Qt 6.11); X11 (xcb) is always deployed.
+# Bundle the Wayland platform plugins when the Qt install has them (the Qt 6.11
+# online installer no longer ships them on Linux, so this is usually a no-op and
+# the app runs through xcb/XWayland); X11 (xcb) is always deployed.
 QT_PLUGINS="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
 WAYLAND_PLUGINS=""
 for plugin in libqwayland-generic.so libqwayland-egl.so; do
