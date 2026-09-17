@@ -183,6 +183,10 @@ public:
     // Folder holding library.json / session.json (SILO_DATA_DIR overrides the platform default).
     static QString dataDirectory();
     Q_INVOKABLE QString dataPath() const { return dataDirectory(); }
+    // Where the web profile (cookies, site storage, cache) lives when
+    // SILO_DATA_DIR is set, so a test instance never touches the real one.
+    // Empty otherwise: QtWebEngine keeps its platform default.
+    Q_INVOKABLE QString webStoragePath() const;
 
 signals:
     void currentWorkspaceChanged();

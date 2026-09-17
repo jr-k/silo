@@ -851,6 +851,13 @@ QString AppStore::dataDirectory()
     return directory;
 }
 
+QString AppStore::webStoragePath() const
+{
+    if (qEnvironmentVariableIsEmpty("SILO_DATA_DIR"))
+        return {};
+    return dataDirectory() + QStringLiteral("/web");
+}
+
 QString AppStore::storagePath() const
 {
     return dataDirectory() + QStringLiteral("/library.json");

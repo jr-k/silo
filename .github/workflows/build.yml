@@ -117,11 +117,20 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/silo-build.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
 
-          # Accept the same shapes electron-builder does for CSC_LINK.
-          case "$APPLE_CSC_LINK" in
-            https://*) curl -fsSL -o "$CERT" "$APPLE_CSC_LINK" ;;
-            *)         printf '%s' "${APPLE_CSC_LINK#data:*;base64,}" | base64 --decode > "$CERT" ;;
+          # Accept the same shapes electron-builder does for CSC_LINK. Secrets
+          # pasted from a file often carry line breaks: strip all whitespace first.
+          LINK="$(printf '%s' "$APPLE_CSC_LINK" | tr -d '[:space:]')"
+          LINK="${LINK#data:*;base64,}"
+          case "$LINK" in
+            https://*) echo "APPLE_CSC_LINK is a URL (${#LINK} chars)"; curl -fsSL -o "$CERT" "$LINK" ;;
+            file://*)  cp "${LINK#file://}" "$CERT" ;;
+            *)         echo "APPLE_CSC_LINK is inline base64 (${#LINK} chars)"; printf '%s' "$LINK" | base64 --decode > "$CERT" ;;
           esac
+          # Keychain exports use legacy RC2 encryption: OpenSSL 3 needs -legacy, LibreSSL/1.1 don't have it.
+          p12_ok() { openssl pkcs12 -in "$CERT" -passin "pass:$APPLE_CSC_KEY_PASSWORD" -nokeys -noout "$@" 2>/dev/null; }
+          if ! p12_ok && ! p12_ok -legacy; then
+            echo "::error::APPLE_CSC_LINK is not a .p12 readable with APPLE_CSC_KEY_PASSWORD ($(file -b "$CERT" | cut -c1-60))"; exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -182,6 +191,9 @@ jobs:
           arch: win64_msvc2022_64
           modules: ${{ env.QT_MODULES }}
           cache: true
+          # Qt >= 6.11 splits the Windows repository per compiler; the fix
+          # (miurahr/aqtinstall#1000) is merged but not yet on PyPI (3.3.0).
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git
 
       - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@v1

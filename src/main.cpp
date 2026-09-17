@@ -15,11 +15,53 @@
 #include <QtWebEngineCore/qtwebenginecoreglobal.h>
 #include <QtWebEngineQuick/QtWebEngineQuick>
 
+#ifdef Q_OS_UNIX
+#include <QSocketNotifier>
+#include <csignal>
+#include <unistd.h>
+#endif
+
 #ifndef SILO_VERSION_STRING
 #define SILO_VERSION_STRING "0.0.0"
 #endif
 #ifndef SILO_GIT_SHA
 #define SILO_GIT_SHA ""
+#endif
+
+#ifdef Q_OS_UNIX
+// Ctrl+C in the terminal that launched Silo (`make run`), `kill`, or a closing
+// terminal must go through the normal Qt shutdown: Chromium writes cookies and
+// site storage in batches and only flushes the rest when the profile is torn
+// down, so dying on the signal loses the last minutes of logins. The handler
+// just writes a byte; the event loop picks it up and quits cleanly.
+namespace {
+int signalPipe[2] = {-1, -1};
+
+void onQuitSignal(int)
+{
+    const char byte = 1;
+    (void)!::write(signalPipe[1], &byte, 1);
+}
+
+void installQuitSignals(QObject *parent)
+{
+    if (::pipe(signalPipe) != 0)
+        return;
+    auto *notifier = new QSocketNotifier(signalPipe[0], QSocketNotifier::Read, parent);
+    QObject::connect(notifier, &QSocketNotifier::activated, parent, [notifier] {
+        char byte;
+        (void)!::read(signalPipe[0], &byte, 1);
+        notifier->setEnabled(false);
+        QCoreApplication::quit();
+    });
+    struct sigaction action {};
+    action.sa_handler = onQuitSignal;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART;
+    for (int signal : {SIGINT, SIGTERM, SIGHUP})
+        sigaction(signal, &action, nullptr);
+}
+} // namespace
 #endif
 
 #include "AppStore.h"
@@ -62,6 +104,9 @@ int main(int argc, char *argv[])
     applicationIcon.addFile(QStringLiteral(":/app/logo-64.png"));
     applicationIcon.addFile(QStringLiteral(":/app/logo-512.png"));
     QGuiApplication::setWindowIcon(applicationIcon);
+#ifdef Q_OS_UNIX
+    installQuitSignals(&app);
+#endif
 
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     qmlRegisterType<TerminalSession>("Silo.Backend", 1, 0, "TerminalSession");

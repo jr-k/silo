@@ -57,6 +57,9 @@ set_source_files_properties(qml/Theme.qml qml/DragState.qml qml/Session.qml qml/
 qt_add_qml_module(Silo
     URI Silo
     VERSION 1.0
+    # Keep the on-disk module out of the build root: on Linux the executable
+    # is also named "Silo" and the two would collide.
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/qml/Silo"
     QML_FILES
         qml/Main.qml
         qml/Theme.qml
