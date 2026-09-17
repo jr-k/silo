@@ -71,7 +71,19 @@ else
 fi
 export QMAKE
 export QML_SOURCES_PATHS="$ROOT_DIR/qml"
-export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
+
+# Bundle the Wayland platform plugins when the Qt install has them (they live in
+# the qtwaylandcompositor addon since Qt 6.11); X11 (xcb) is always deployed.
+QT_PLUGINS="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
+WAYLAND_PLUGINS=""
+for plugin in libqwayland-generic.so libqwayland-egl.so; do
+  if [ -f "$QT_PLUGINS/platforms/$plugin" ]; then
+    WAYLAND_PLUGINS="${WAYLAND_PLUGINS:+$WAYLAND_PLUGINS;}$plugin"
+  else
+    echo "note: $plugin not found in $QT_PLUGINS/platforms, skipping"
+  fi
+done
+[ -n "$WAYLAND_PLUGINS" ] && export EXTRA_PLATFORM_PLUGINS="$WAYLAND_PLUGINS"
 export OUTPUT="$OUT_DIR/Silo-$VERSION-linux-$ARCH.AppImage"
 # Runners have no FUSE; run the AppImage tools by extracting them instead.
 export APPIMAGE_EXTRACT_AND_RUN=1

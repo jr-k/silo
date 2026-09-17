@@ -126,10 +126,26 @@ jobs:
             file://*)  cp "${LINK#file://}" "$CERT" ;;
             *)         echo "APPLE_CSC_LINK is inline base64 (${#LINK} chars)"; printf '%s' "$LINK" | base64 --decode > "$CERT" ;;
           esac
-          # Keychain exports use legacy RC2 encryption: OpenSSL 3 needs -legacy, LibreSSL/1.1 don't have it.
-          p12_ok() { openssl pkcs12 -in "$CERT" -passin "pass:$APPLE_CSC_KEY_PASSWORD" -nokeys -noout "$@" 2>/dev/null; }
-          if ! p12_ok && ! p12_ok -legacy; then
-            echo "::error::APPLE_CSC_LINK is not a .p12 readable with APPLE_CSC_KEY_PASSWORD ($(file -b "$CERT" | cut -c1-60))"; exit 1
+          # Advisory check only; `security import` below is authoritative. Keychain
+          # exports use legacy RC2: OpenSSL 3 needs -legacy, LibreSSL (/usr/bin) and 1.1 don't.
+          P12_ERR=""
+          p12_ok() {
+            local bin out
+            for bin in /usr/bin/openssl openssl; do
+              for extra in "" "-legacy"; do
+                # shellcheck disable=SC2086
+                if out="$("$bin" pkcs12 -in "$CERT" -passin "pass:$APPLE_CSC_KEY_PASSWORD" -nokeys -noout $extra 2>&1)"; then
+                  return 0
+                fi
+                P12_ERR="$bin ${extra:-(default)}: $(echo "$out" | grep -v '^$' | tail -1)"
+              done
+            done
+            return 1
+          }
+          if p12_ok; then
+            echo ".p12 verified with APPLE_CSC_KEY_PASSWORD"
+          else
+            echo "::warning::could not verify the .p12 with openssl ($P12_ERR); relying on security import"
           fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
@@ -303,7 +319,9 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: linux
           arch: linux_gcc_64
-          modules: ${{ env.QT_MODULES }}
+          # qtwaylandcompositor also carries the Wayland *client* platform plugin
+          # (libqwayland-generic.so), split out of the base package since Qt 6.11.
+          modules: ${{ env.QT_MODULES }} qtwaylandcompositor
           cache: true
 
       - name: Configure
