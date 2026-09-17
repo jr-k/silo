@@ -375,16 +375,19 @@ jobs:
         run: |
           set -euo pipefail
           ls -la
-          if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --draft --title "$NAME" --generate-notes
-          fi
-          # The "release by tag" endpoint can return 404 for a newly-created
-          # draft. Listing releases includes drafts immediately.
+          # Reuse a draft from a previous attempt when it is already indexed.
           RELEASE_ID="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
             --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)"
+          # Create through the REST API so its response gives us the ID directly.
+          # GitHub's lookup endpoints are eventually consistent and can return
+          # 404/empty immediately after creating a draft.
           if [ -z "$RELEASE_ID" ]; then
-            echo "::error::could not resolve the draft release for $TAG"
-            exit 1
+            RELEASE_ID="$(gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="$TAG" \
+              -f name="$NAME" \
+              -F draft=true \
+              -F generate_release_notes=true \
+              --jq .id)"
           fi
           UPLOAD_URL="https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets"
           for file in *; do
@@ -400,5 +403,6 @@ jobs:
               "$UPLOAD_URL?name=$file"
             echo "uploaded $file"
           done
-          gh release edit "$TAG" --draft=false
-          gh release view "$TAG"
+          # Publish by immutable ID as tag lookup can still be stale here.
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -F draft=false --jq .html_url
