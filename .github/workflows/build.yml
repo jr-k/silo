@@ -1,6 +1,6 @@
-# Builds Silo for macOS (universal DMG), Windows (x64 installer + portable zip)
-# and Linux (x86_64 AppImage) when a `vX.Y.Z` tag is pushed, and publishes a
-# GitHub Release with the three artifacts. Pull requests and manual runs build
+# Builds Silo for macOS (one DMG per chip: Apple Silicon and Intel), Windows
+# (x64 installer + portable zip) and Linux (x86_64 AppImage) when a `vX.Y.Z`
+# tag is pushed, and publishes a GitHub Release with the artifacts. Pull requests and manual runs build
 # too (no release); pushes to master alone do nothing.
 #
 # Signing is opportunistic: each step runs only when its secrets are present, so
@@ -76,12 +76,19 @@ jobs:
           echo "Silo $VERSION (CMake $CMAKE_VERSION, release=$IS_RELEASE)"
 
   # ---------------------------------------------------------------------------
-  # macOS: universal binary, signed + notarized DMG.
+  # macOS: one native build per chip (the Qt install is universal, so both
+  # compile on the same Apple Silicon runner), each signed + notarized in its
+  # own DMG. Halves the download compared to a universal binary: Qt WebEngine
+  # is the bulk of it.
   # ---------------------------------------------------------------------------
   macos:
-    name: macOS
+    name: macOS (${{ matrix.arch }})
     needs: meta
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CSC_LINK != '' && secrets.APPLE_CSC_KEY_PASSWORD != '' }}
     steps:
@@ -100,7 +107,7 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
           -DSILO_VERSION=${{ needs.meta.outputs.cmake_version }}
 
       - name: Build
@@ -178,7 +185,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: silo-macos
+          name: silo-macos-${{ matrix.arch }}
           path: dist/*.dmg
           if-no-files-found: error
 

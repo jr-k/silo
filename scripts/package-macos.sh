@@ -9,8 +9,8 @@
 #   MACOS_SIGN_IDENTITY          "Developer ID Application: Name (TEAMID)". Unset => unsigned DMG.
 #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
 #                                Notarization credentials. All three required to notarize.
-#   MACOS_ARCH_LABEL             Suffix in the DMG name (default: derived from the binary,
-#                                "universal" when it contains both arm64 and x86_64).
+#   MACOS_ARCH_LABEL             Suffix in the DMG name (default: derived from the binary:
+#                                "arm64", "x86_64", or "universal" when it holds both).
 set -euo pipefail
 
 BUILD_DIR="${1:?usage: package-macos.sh <build-dir> <version> [out-dir]}"
