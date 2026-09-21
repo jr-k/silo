@@ -11,6 +11,14 @@ Web apps, SSH hosts and local files, organized like a file explorer and opened s
 
 <br>
 
+<a href="https://github.com/jr-k/silo/releases/latest"><img src="https://img.shields.io/badge/macOS-Download%20.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
+<a href="https://github.com/jr-k/silo/releases/latest"><img src="https://img.shields.io/badge/Windows-Download%20.exe-0078D4?style=for-the-badge&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0zIDUuNWw3LjUtMXY3SDN6TTExLjUgNC4zTDIxIDN2OC41aC05LjV6TTMgMTIuNWg3LjV2N0wzIDE4LjV6TTExLjUgMTIuNUgyMVYyMWwtOS41LTEuM3oiLz48L3N2Zz4=" alt="Download for Windows"></a>
+<a href="https://github.com/jr-k/silo/releases/latest"><img src="https://img.shields.io/badge/Linux-Download%20.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux"></a>
+
+<sub>Universal DMG for macOS, installer or portable zip for Windows x64, AppImage for Linux x86_64. Checksums in <code>SHA256SUMS.txt</code>.</sub>
+
+<br>
+
 <img src="docs/screenshots/organize.png" alt="Silo in Organize mode" width="900">
 
 </div>
