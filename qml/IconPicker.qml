@@ -23,6 +23,10 @@ ColumnLayout {
                                           "#CE6429", "#B08A20", "#56606B", "#272A2E"]
     readonly property var emojis: ["📦", "🪴", "🧭", "🎨", "🚀", "💼", "🏠", "✨"]
 
+    // Persisted when the badge has no background (fully transparent)
+    readonly property string noBackground: "#00000000"
+    readonly property bool isTransparent: badgeColor.a === 0
+
     readonly property bool isDefault: iconType === "default"
     readonly property bool valid: isDefault
                                   || (iconType === "emoji" ? iconValue.length > 0 : imageSource.length > 0)
@@ -162,6 +166,39 @@ ColumnLayout {
 
         Row {
             spacing: 8
+            // No background: white disc crossed by a red diagonal
+            Rectangle {
+                id: noneSwatch
+                readonly property bool selected: picker.isTransparent
+                width: 28
+                height: 28
+                radius: 14
+                color: "#FFFFFF"
+                border.width: selected ? 3 : 0
+                border.color: Theme.surface
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 18
+                    height: 2
+                    radius: 1
+                    rotation: -45
+                    color: "#E5484D"
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -2
+                    radius: width / 2
+                    color: "transparent"
+                    border.width: noneSwatch.selected ? 2 : 1
+                    border.color: noneSwatch.selected ? Theme.accent : Theme.borderStrong
+                }
+                HoverHandler { id: noneHover }
+                ToolTip.visible: noneHover.hovered
+                ToolTip.text: "No background"
+                ToolTip.delay: 500
+                TapHandler { onTapped: picker.badgeColor = picker.noBackground }
+            }
             Repeater {
                 model: picker.paletteColors
                 delegate: Rectangle {

@@ -97,6 +97,7 @@ qt_add_qml_module(Silo
         qml/Sidebar.qml
         qml/DirectoryView.qml
         qml/ItemDialog.qml
+        qml/BulkIconDialog.qml
         qml/DeleteDialog.qml
         qml/SidebarToggle.qml
         qml/TextEditor.qml

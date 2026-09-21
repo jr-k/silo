@@ -163,6 +163,10 @@ public:
                                 const QString &iconType = {}, const QString &iconValue = {},
                                 const QString &color = {}, const QString &type = {},
                                 const QVariantMap &options = {});
+    // Applies the same icon (type, value, background) to every leaf item of the
+    // list; folders and unknown ids are skipped. Empty iconType = default icon.
+    Q_INVOKABLE void setItemsIcon(const QVariantList &ids, const QString &iconType,
+                                  const QString &iconValue, const QString &color);
     Q_INVOKABLE void deleteNodes(const QVariantList &ids);
     Q_INVOKABLE void moveNodes(const QVariantList &ids, const QString &destinationId);
     // Deep-copies the nodes (folders with their whole subtree) into the destination

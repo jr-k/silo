@@ -176,6 +176,29 @@ Item {
     }
 
     ItemDialog { id: itemDialog }
+    BulkIconDialog {
+        id: bulkIconDialog
+        onClosed: root.forceActiveFocus()
+    }
+    readonly property string bulkIconLabel: "Edit icon of " + selectedItemCount + (selectedItemCount > 1 ? " items…" : " item…")
+
+    // Leaf items in the selection (folders have no icon to bulk-edit)
+    readonly property int selectedItemCount: {
+        var revision = appStore.revision
+        var count = 0
+        for (var i = 0; i < selectedIds.length; ++i) {
+            var info = appStore.nodeInfo(selectedIds[i])
+            if (info.id && !info.folder)
+                ++count
+        }
+        return count
+    }
+    readonly property bool canBulkEditIcon: selectedIds.length > 1 && selectedItemCount > 0
+
+    function editSelectionIcon() {
+        if (canBulkEditIcon)
+            bulkIconDialog.openFor(selectedIds)
+    }
 
     // Context menus (single instances, retargeted per tile)
     SiloMenu {
@@ -193,6 +216,13 @@ Item {
         }
         FolderColorMenu {
             folderId: folderTileMenu.targetId
+        }
+        SiloMenuItem {
+            visible: root.canBulkEditIcon
+            height: visible ? implicitHeight : 0
+            text: root.bulkIconLabel
+            iconName: "fluent-emoji-20-regular"
+            onTriggered: root.editSelectionIcon()
         }
         MenuSeparator {
             padding: 4
@@ -230,6 +260,13 @@ Item {
             text: "Edit…"
             iconName: "fluent-edit-20-regular"
             onTriggered: itemDialog.openForEdit(itemTileMenu.targetId)
+        }
+        SiloMenuItem {
+            visible: root.canBulkEditIcon
+            height: visible ? implicitHeight : 0
+            text: root.bulkIconLabel
+            iconName: "fluent-emoji-20-regular"
+            onTriggered: root.editSelectionIcon()
         }
         SiloMenuItem {
             text: "Rename"

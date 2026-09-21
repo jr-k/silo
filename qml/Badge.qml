@@ -12,9 +12,12 @@ Rectangle {
     radius: Math.round(size * 0.25)
     color: "#176E61"
 
+    // No background: the picto fills the whole box
+    readonly property bool transparentBg: color.a === 0
+
     Image {
         anchors.fill: parent
-        anchors.margins: Math.round(badge.size * 0.18)
+        anchors.margins: badge.transparentBg ? 0 : Math.round(badge.size * 0.18)
         visible: badge.iconType === "image"
         source: badge.iconType === "image" ? badge.iconValue : ""
         fillMode: Image.PreserveAspectFit
@@ -26,7 +29,7 @@ Rectangle {
         anchors.centerIn: parent
         visible: badge.iconType !== "image"
         text: badge.iconValue
-        font.pixelSize: Math.round(badge.size * 0.55)
+        font.pixelSize: Math.round(badge.size * (badge.transparentBg ? 0.8 : 0.55))
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
     }

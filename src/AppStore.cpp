@@ -581,6 +581,30 @@ void AppStore::updateItem(const QString &id, const QString &name, const QString 
     emit dataChanged();
 }
 
+void AppStore::setItemsIcon(const QVariantList &ids, const QString &iconType,
+                            const QString &iconValue, const QString &color)
+{
+    QStringList touched;
+    for (const auto &value : ids) {
+        const auto node = findNode(value.toString());
+        if (!node || node->folder)
+            continue;
+        node->iconType = iconType;
+        node->iconValue = iconValue;
+        node->color = color;
+        touched.append(node->id);
+    }
+    if (touched.isEmpty())
+        return;
+    save();
+    for (const auto &id : touched) {
+        m_treeModel.refreshNode(id);
+        m_directoryModel.refreshNode(id);
+    }
+    ++m_revision;
+    emit dataChanged();
+}
+
 void AppStore::deleteNodes(const QVariantList &ids)
 {
     QSet<QString> idSet;
@@ -907,16 +931,12 @@ void AppStore::load()
         workspace.iconType = QStringLiteral("emoji");
         workspace.iconValue = QStringLiteral("📦");
 
-        auto work = std::make_shared<SiloNode>();
-        work->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        work->name = QStringLiteral("Work");
-        work->folder = true;
-        auto design = std::make_shared<SiloNode>();
-        design->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        design->name = QStringLiteral("Design system");
-        design->url = QStringLiteral("https://developer.apple.com/design/");
-        work->children.append(design);
-        workspace.roots.append(work);
+        // First-run seed: a single item pointing at the project's GitHub page.
+        auto github = std::make_shared<SiloNode>();
+        github->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        github->name = QStringLiteral("Silo on GitHub");
+        github->url = QStringLiteral("https://github.com/jr-k/silo");
+        workspace.roots.append(github);
         m_workspaces.append(workspace);
     }
 
