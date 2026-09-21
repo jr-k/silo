@@ -28,7 +28,7 @@ Item {
     }
 
     // Reloads the web and file tabs of the current workspace that have been
-    // loaded already (lazily restored ones load fresh on first show anyway).
+    // loaded already.
     function reloadAll() {
         for (var i = 0; i < root.tabCount; ++i) {
             var view = root.viewAt(i)
@@ -588,8 +588,11 @@ Item {
                                     // The item type is fixed for the tab's lifetime
                                     tabType: appStore.nodeInfo(tabNodeId).type || "web"
 
-                                    // Restored tabs load lazily, the first time they are shown.
-                                    Component.onCompleted: if (visible) ensureLoaded()
+                                    // Web pages and files load right away, so "Open all items" and a
+                                    // restored session are ready without visiting each tab. Terminals
+                                    // wait for their first show: connecting to every host at startup
+                                    // is not what a restored layout should do.
+                                    Component.onCompleted: if (visible || tabType !== "ssh") ensureLoaded()
                                     onVisibleChanged: if (visible) ensureLoaded()
                                 }
                             }

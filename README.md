@@ -31,7 +31,7 @@ Silo has a single mental model: workspaces contain folders, folders contain item
 
 **Organize** looks and behaves like Windows Explorer. Tiles on a grid, breadcrumbs, a `..` tile to move things up, shift- and ctrl-click selection, drag & drop between folders and into the sidebar, rename in place with <kbd>Space</kbd>, copy and paste whole sub-trees with <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd>.
 
-**Live** turns the same tree into a launcher. Click a leaf, it opens in a tab on the right. Tabs are kept per workspace, persisted to disk and restored lazily on the next start, so a carefully laid-out set of dashboards, shells and documents is never lost.
+**Live** turns the same tree into a launcher. Click a leaf, it opens in a tab on the right. Tabs are kept per workspace, persisted to disk and restored on the next start (pages and files load right away, terminals reconnect when you switch to them), so a carefully laid-out set of dashboards, shells and documents is never lost.
 
 <img src="docs/screenshots/live.png" alt="Live mode with a Grafana dashboard" width="900">
 

@@ -35,6 +35,10 @@ class PasswordManager final : public QObject
     Q_PROPERTY(QVariantMap errors READ errors NOTIFY errorChanged)
     // Enabled connectors that can answer a search right now
     Q_PROPERTY(int usableCount READ usableCount NOTIFY connectorsChanged)
+    // Enabled, installed connectors whose CLI has not been asked its status yet.
+    // Probing is lazy (first search or Settings › Passwords), never at launch:
+    // running `op` makes macOS ask for access to the 1Password app's data.
+    Q_PROPERTY(int unprobedCount READ unprobedCount NOTIFY connectorsChanged)
     // Enabled connectors waiting for a password (Bitwarden / 1Password unlock)
     Q_PROPERTY(QStringList lockedConnectors READ lockedConnectors NOTIFY connectorsChanged)
 
@@ -48,6 +52,7 @@ public:
     QString error() const { return m_error; }
     QVariantMap errors() const;
     int usableCount() const;
+    int unprobedCount() const;
     QStringList lockedConnectors() const;
 
     Q_INVOKABLE void refresh();
@@ -97,6 +102,8 @@ private:
     Connector *find(const QString &id);
     const Connector *find(const QString &id) const;
     bool usable(const Connector &connector) const;
+    bool needsProbe(const Connector &connector) const;
+    void probeDone(const QString &id);
     void run(const Connector &connector, const QStringList &args, const Callback &callback,
              const QProcessEnvironment &extraEnv = {}, int timeoutMs = 90000, const QByteArray &stdinData = {});
     void setError(const QString &id, const QString &error);
@@ -141,6 +148,11 @@ private:
     QHash<QString, QString> m_errors;
     QNetworkAccessManager *m_network = nullptr;
     QHash<QString, int> m_pendingSearches;
+    // Status probes in flight / completed at least once, and the search that
+    // waits for the first probes to answer
+    QSet<QString> m_probing;
+    QSet<QString> m_probed;
+    QString m_deferredSearch;
 
     // 1Password: one entry per signed-in account (every `op` call must name its
     // account, otherwise the CLI prompts for one), with item cache and session

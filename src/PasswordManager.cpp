@@ -107,7 +107,10 @@ PasswordManager::PasswordManager(QObject *parent) : QObject(parent), m_network(n
     QSettings settings;
     for (Connector &connector : m_connectors)
         connector.enabled = settings.value(kEnabledKey.arg(connector.id), true).toBool();
-    refresh();
+    // Only look for the CLIs on disk here. Their status is probed on first use
+    // (see needsProbe): spawning `op` at launch would trigger the macOS
+    // "access data from other apps" prompt every time Silo starts.
+    detect();
 }
 
 // Child CLIs still running at exit are killed rather than left orphaned.
@@ -197,6 +200,21 @@ int PasswordManager::usableCount() const
     int count = 0;
     for (const Connector &connector : m_connectors)
         if (usable(connector))
+            ++count;
+    return count;
+}
+
+// Enabled and installed, but its CLI has never been asked its status
+bool PasswordManager::needsProbe(const Connector &connector) const
+{
+    return connector.enabled && !connector.cliPath.isEmpty() && !m_probed.contains(connector.id);
+}
+
+int PasswordManager::unprobedCount() const
+{
+    int count = 0;
+    for (const Connector &connector : m_connectors)
+        if (needsProbe(connector))
             ++count;
     return count;
 }
@@ -347,14 +365,29 @@ void PasswordManager::refresh()
 void PasswordManager::refreshStatus(const QString &id)
 {
     Connector *connector = find(id);
-    if (!connector || connector->cliPath.isEmpty())
+    if (!connector || connector->cliPath.isEmpty() || m_probing.contains(id))
         return;
+    m_probing.insert(id);
     if (id == kBitwarden)
         bwRefresh(*connector);
     else if (id == kOnePassword)
         opRefresh(*connector);
     else if (id == kDashlane)
         dcliRefresh(*connector);
+}
+
+// Called once per status probe, whatever its outcome. Runs the search that
+// was waiting for the first probes as soon as the last one has answered.
+void PasswordManager::probeDone(const QString &id)
+{
+    m_probing.remove(id);
+    m_probed.insert(id);
+    emit connectorsChanged();
+    if (m_probing.isEmpty() && !m_deferredSearch.isEmpty()) {
+        const QString url = m_deferredSearch;
+        m_deferredSearch.clear();
+        search(url);
+    }
 }
 
 // ------------------------------------------------------------------ process plumbing
@@ -449,6 +482,18 @@ void PasswordManager::run(const Connector &connector, const QStringList &args, c
 void PasswordManager::search(const QString &url)
 {
     const QString host = hostFromAny(url);
+    // First search of the session: ask the CLIs their status first, the search
+    // resumes from probeDone() once they have all answered.
+    QStringList toProbe;
+    for (const Connector &connector : m_connectors)
+        if (needsProbe(connector))
+            toProbe.append(connector.id);
+    if (!host.isEmpty() && !toProbe.isEmpty()) {
+        m_deferredSearch = url;
+        for (const QString &id : toProbe)
+            refreshStatus(id);
+        return;
+    }
     QStringList sources;
     for (const Connector &connector : m_connectors)
         if (usable(connector)) {
@@ -882,11 +927,16 @@ void PasswordManager::opUpdateAuth(Connector &connector)
 void PasswordManager::opRefresh(Connector &connector)
 {
     const QString id = connector.id;
+    // Generous timeout: the first call makes macOS ask the user whether Silo may
+    // access the 1Password app's data, and killing `op` while that prompt is up
+    // would leave the answer unrecorded (so it would be asked again).
     run(connector, {QStringLiteral("account"), QStringLiteral("list"), QStringLiteral("--format"), QStringLiteral("json")},
         [this, id](int code, const QByteArray &out, const QByteArray &) {
             Connector *connector = find(id);
-            if (!connector)
+            if (!connector) {
+                probeDone(id);
                 return;
+            }
             QList<OpAccount> accounts;
             if (code == 0) {
                 for (const QJsonValue &value : QJsonDocument::fromJson(out).array()) {
@@ -914,7 +964,8 @@ void PasswordManager::opRefresh(Connector &connector)
             }
             m_opAccounts = accounts;
             opUpdateAuth(*connector);
-        }, {}, 20000);
+            probeDone(id);
+        }, {}, 90000);
     run(connector, {QStringLiteral("--version")}, [this, id](int code, const QByteArray &out, const QByteArray &) {
         Connector *connector = find(id);
         if (connector && code == 0) {
@@ -1118,8 +1169,10 @@ void PasswordManager::bwRefresh(Connector &connector)
     run(connector, {QStringLiteral("status")},
         [this, id](int code, const QByteArray &out, const QByteArray &) {
             Connector *connector = find(id);
-            if (!connector || code != 0)
+            if (!connector || code != 0) {
+                probeDone(id);
                 return;
+            }
             const QJsonObject status = QJsonDocument::fromJson(out).object();
             const QString state = status.value(QStringLiteral("status")).toString();
             const QString account = status.value(QStringLiteral("userEmail")).toString();
@@ -1129,6 +1182,7 @@ void PasswordManager::bwRefresh(Connector &connector)
                 setAuth(*connector, QStringLiteral("unlocked"), account);
             else
                 setAuth(*connector, QStringLiteral("locked"), account);
+            probeDone(id);
         }, env, 30000);
     run(connector, {QStringLiteral("--version")}, [this, id](int code, const QByteArray &out, const QByteArray &) {
         Connector *connector = find(id);
@@ -1269,16 +1323,20 @@ void PasswordManager::dcliRefresh(Connector &connector)
     run(connector, {QStringLiteral("status")},
         [this, id](int code, const QByteArray &out, const QByteArray &) {
             Connector *connector = find(id);
-            if (!connector)
+            if (!connector) {
+                probeDone(id);
                 return;
+            }
             const QString text = QString::fromUtf8(out);
             if (code != 0 || !text.contains(QStringLiteral("Logged in: yes"))) {
                 setAuth(*connector, QStringLiteral("signed-out"));
+                probeDone(id);
                 return;
             }
             const QRegularExpressionMatch login = QRegularExpression(QStringLiteral("Login:\\s*(\\S+)")).match(text);
             const QString account = login.hasMatch() ? login.captured(1) : QString();
             setAuth(*connector, text.contains(QStringLiteral("Locked: yes")) ? QStringLiteral("locked") : QStringLiteral("unlocked"), account);
+            probeDone(id);
         }, {}, 20000);
     run(connector, {QStringLiteral("--version")}, [this, id](int code, const QByteArray &out, const QByteArray &) {
         Connector *connector = find(id);

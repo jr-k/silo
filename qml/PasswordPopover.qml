@@ -35,7 +35,8 @@ Popup {
                 list.push(id)
         return list
     }
-    readonly property bool nothingConfigured: vault.count === 0 && !vault.locked && passwords.usableCount === 0 && lockedIds.length === 0
+    readonly property bool nothingConfigured: vault.count === 0 && !vault.locked && passwords.usableCount === 0
+                                              && passwords.unprobedCount === 0 && lockedIds.length === 0
 
     width: 360
     padding: 8
@@ -73,7 +74,8 @@ Popup {
         bySource = {}
         fetchingId = ""
         results = vault.locked ? [] : vault.search(pageUrl)
-        searching = passwords.usableCount > 0
+        // Connectors not probed yet are asked their status by the search itself
+        searching = passwords.usableCount > 0 || passwords.unprobedCount > 0
         if (searching)
             passwords.search(pageUrl)
     }

@@ -119,22 +119,87 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. DMG with an /Applications shortcut.
+# 4. DMG: Silo.app on the left, an /Applications shortcut on the right, over
+#    a background that says "drag to install". The layout lives in the
+#    volume's .DS_Store, which only Finder can write: a read-write image is
+#    mounted, arranged through AppleScript, then compressed.
 # ---------------------------------------------------------------------------
-log "hdiutil create $DMG_NAME"
+log "stage DMG contents"
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
+RW_DMG="$(mktemp -d)/Silo-rw.dmg"
+MOUNT_DIR=""
+cleanup() {
+  [ -n "$MOUNT_DIR" ] && hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true
+  rm -rf "$STAGING" "$(dirname "$RW_DMG")"
+}
+trap cleanup EXIT
+
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
-rm -f "$OUT_DIR/$DMG_NAME"
+mkdir "$STAGING/.background"
+# Multi-resolution TIFF so Finder picks the @2x variant on Retina displays.
+tiffutil -cathidpicheck "$ROOT_DIR/packaging/macos/dmg-background.png" \
+                        "$ROOT_DIR/packaging/macos/dmg-background@2x.png" \
+         -out "$STAGING/.background/background.tiff"
+
+log "hdiutil create (read-write)"
 # hdiutil occasionally fails with "Resource busy" on CI runners; retry a few times.
 for attempt in 1 2 3 4 5; do
-  if hdiutil create -volname "Silo" -srcfolder "$STAGING" -ov -format UDZO "$OUT_DIR/$DMG_NAME"; then
+  if hdiutil create -volname "Silo" -srcfolder "$STAGING" -ov -format UDRW -fs HFS+ "$RW_DMG"; then
     break
   fi
   [ "$attempt" -eq 5 ] && { echo "error: hdiutil failed" >&2; exit 1; }
   sleep 5
 done
+
+log "arrange Finder window"
+MOUNT_DIR="$(hdiutil attach -readwrite -noverify -noautoopen "$RW_DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')"
+[ -d "$MOUNT_DIR" ] || { echo "error: could not mount $RW_DMG" >&2; exit 1; }
+# Open the window automatically when the image is mounted (Intel only, the
+# option is gone on Apple Silicon).
+bless --folder "$MOUNT_DIR" --openfolder "$MOUNT_DIR" 2>/dev/null || true
+
+# Window 660x400 (matches the background), 128px icons, labels below.
+# Best effort: without a Finder session (some CI runners) the DMG still
+# works, only the layout falls back to Finder's default.
+if ! osascript <<EOF
+tell application "Finder"
+  tell disk "Silo"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {400, 120, 1060, 520}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    set text size of viewOptions to 13
+    set label position of viewOptions to bottom
+    set background picture of viewOptions to file ".background:background.tiff"
+    set position of item "Silo.app" of container window to {165, 185}
+    set position of item "Applications" of container window to {495, 185}
+    close
+    open
+    update without registering applications
+    delay 2
+    close
+  end tell
+end tell
+EOF
+then
+  echo "warning: Finder could not be scripted, keeping the default layout" >&2
+fi
+# Custom volume icon, after the Finder pass: changing the view options makes
+# Finder drop any .VolumeIcon.icns already there.
+cp "$ROOT_DIR/icons/logo/logo-1000.icns" "$MOUNT_DIR/.VolumeIcon.icns"
+SetFile -a C "$MOUNT_DIR" 2>/dev/null || true
+sync
+hdiutil detach "$MOUNT_DIR" >/dev/null || { sleep 3; hdiutil detach "$MOUNT_DIR" -force >/dev/null; }
+MOUNT_DIR=""
+
+log "hdiutil convert $DMG_NAME"
+rm -f "$OUT_DIR/$DMG_NAME"
+hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUT_DIR/$DMG_NAME"
 
 if [ -n "$IDENTITY" ]; then
   log "codesign DMG"

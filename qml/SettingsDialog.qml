@@ -16,8 +16,14 @@ SiloDialog {
     initialFocusItem: doneButton
     // "general" | "passwords" | "about"
     property string section: "general"
-    onOpened: passwords.refresh()
-    onSectionChanged: body.contentY = 0
+    // The CLIs are only queried when their section shows (running `op` makes
+    // macOS ask for access to the 1Password app's data)
+    onOpened: if (section === "passwords") passwords.refresh()
+    onSectionChanged: {
+        body.contentY = 0
+        if (opened && section === "passwords")
+            passwords.refresh()
+    }
 
     function sectionLabel(key) {
         for (var i = 0; i < sections.length; ++i)

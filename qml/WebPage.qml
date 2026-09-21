@@ -6,7 +6,7 @@ import QtWebEngine
 WebEngineView {
     id: page
     property string tabUrl: ""
-    // Restored tabs load lazily, the first time they are shown.
+    // Set by ensureLoaded(), which the tab container calls as soon as the page exists.
     property bool loaded: false
 
     readonly property string kind: "web"
