@@ -3,6 +3,8 @@ import QtQuick.Controls
 
 Menu {
     id: menu
+    property string iconName: ""
+    property color iconColor: Theme.text
     padding: 4
     // Grow with the widest item (checkable items reserve room for the checkmark),
     // never narrower than the 200px background.
@@ -19,5 +21,8 @@ Menu {
         border.color: Theme.border
     }
 
-    delegate: SiloMenuItem {}
+    delegate: SiloMenuItem {
+        iconName: subMenu && subMenu.hasOwnProperty("iconName") ? subMenu.iconName : ""
+        iconColor: subMenu && subMenu.hasOwnProperty("iconColor") ? subMenu.iconColor : Theme.text
+    }
 }

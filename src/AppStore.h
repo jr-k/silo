@@ -158,6 +158,7 @@ public:
                                 const QString &color = {}, const QString &type = QStringLiteral("web"),
                                 const QVariantMap &options = {});
     Q_INVOKABLE void renameNode(const QString &id, const QString &name);
+    Q_INVOKABLE void setFolderColor(const QString &id, const QString &color);
     Q_INVOKABLE void updateItem(const QString &id, const QString &name, const QString &url,
                                 const QString &iconType = {}, const QString &iconValue = {},
                                 const QString &color = {}, const QString &type = {},

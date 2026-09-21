@@ -134,7 +134,7 @@ WebEngineView {
         loaded = true
         url = tabUrl
     }
-    function openExternally() { Qt.openUrlExternally(url) }
+    function openExternally() { Qt.openUrlExternally(loaded ? url : tabUrl) }
 
     // Fills the login form of the page: the visible password field and the
     // text/email field before it (or the focused field). Sites that ask for

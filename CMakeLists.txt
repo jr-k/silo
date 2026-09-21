@@ -84,6 +84,7 @@ qt_add_qml_module(Silo
         qml/SiloTextField.qml
         qml/SiloMenu.qml
         qml/SiloMenuItem.qml
+        qml/FolderColorMenu.qml
         qml/SiloDialog.qml
         qml/Badge.qml
         qml/AccountPicker.qml

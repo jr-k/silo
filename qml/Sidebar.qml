@@ -178,6 +178,9 @@ Item {
             iconName: "fluent-rename-20-regular"
             onTriggered: sidebar.renamingId = folderMenu.targetId
         }
+        FolderColorMenu {
+            folderId: folderMenu.targetId
+        }
         MenuSeparator {
             padding: 4
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
@@ -473,7 +476,7 @@ Item {
                             visible: row.isFolder
                             size: 18
                             name: row.isExpanded ? "fluent-folder-open-20-filled" : "fluent-folder-20-filled"
-                            color: Theme.folder
+                            color: row.nodeColor.length > 0 ? row.nodeColor : Theme.folder
                         }
                         ItemIcon {
                             anchors.fill: parent

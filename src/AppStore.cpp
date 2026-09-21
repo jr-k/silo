@@ -263,7 +263,9 @@ QVariantList AppStore::breadcrumbs() const
     const auto *workspace = currentWorkspace();
     if (workspace && walk(workspace->roots)) {
         for (const auto &node : path)
-            result.append(QVariantMap{{QStringLiteral("id"), node->id}, {QStringLiteral("name"), node->name}});
+            result.append(QVariantMap{{QStringLiteral("id"), node->id},
+                                      {QStringLiteral("name"), node->name},
+                                      {QStringLiteral("color"), node->color}});
     }
     return result;
 }
@@ -536,6 +538,20 @@ void AppStore::renameNode(const QString &id, const QString &name)
     node->name = name.trimmed();
     save();
     // In-place update: a model reset would destroy the delegate being edited.
+    m_treeModel.refreshNode(id);
+    m_directoryModel.refreshNode(id);
+    ++m_revision;
+    emit dataChanged();
+    emit breadcrumbsChanged();
+}
+
+void AppStore::setFolderColor(const QString &id, const QString &color)
+{
+    const auto node = findNode(id);
+    if (!node || !node->folder || node->color == color)
+        return;
+    node->color = color;
+    save();
     m_treeModel.refreshNode(id);
     m_directoryModel.refreshNode(id);
     ++m_revision;
@@ -948,8 +964,9 @@ QJsonObject AppStore::nodeToJson(const NodePtr &node)
     if (!node->iconType.isEmpty()) {
         object.insert(QStringLiteral("iconType"), node->iconType);
         object.insert(QStringLiteral("iconValue"), node->iconValue);
-        object.insert(QStringLiteral("color"), node->color);
     }
+    if (!node->color.isEmpty())
+        object.insert(QStringLiteral("color"), node->color);
     return object;
 }
 

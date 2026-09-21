@@ -10,7 +10,7 @@ MenuItem {
     implicitHeight: 32
     implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
     leftPadding: 10
-    rightPadding: checkable ? 38 : 12
+    rightPadding: checkable || subMenu ? 38 : 12
     hoverEnabled: true
 
     contentItem: Row {
@@ -37,6 +37,15 @@ MenuItem {
         name: "fluent-checkmark-20-regular"
         size: 16
         color: Theme.accent
+    }
+
+    arrow: Icon {
+        visible: !!control.subMenu
+        x: control.width - width - 12
+        y: (control.height - height) / 2
+        name: "fluent-chevron-right-16-regular"
+        size: 14
+        color: Theme.textTertiary
     }
 
     background: Rectangle {

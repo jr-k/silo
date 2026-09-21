@@ -37,6 +37,15 @@ Item {
         }
     }
 
+    // Opens every web tab of the current workspace in the system browser.
+    function openAllInBrowser() {
+        for (var i = 0; i < root.tabCount; ++i) {
+            var view = root.viewAt(i)
+            if (view && view.kind === "web")
+                view.openExternally()
+        }
+    }
+
     // Keep tabs consistent with the tree: renames update titles/urls, deletions close tabs.
     function syncTabs() {
         // While a workspace switch is in flight the tabs still belong to the previous one.
@@ -223,9 +232,21 @@ Item {
                 onClicked: root.reloadAll()
             }
 
+            IconButton {
+                id: openAllButton
+                anchors.left: refreshAllButton.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                iconName: "fluent-open-20-regular"
+                iconSize: 18
+                enabled: root.tabCount > 0
+                tooltip: "Open all in browser"
+                onClicked: root.openAllInBrowser()
+            }
+
             ListView {
                 id: tabStrip
-                anchors.left: refreshAllButton.right
+                anchors.left: openAllButton.right
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom

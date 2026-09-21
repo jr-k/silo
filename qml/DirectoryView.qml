@@ -191,6 +191,9 @@ Item {
             iconName: "fluent-rename-20-regular"
             onTriggered: root.beginRename(folderTileMenu.targetId)
         }
+        FolderColorMenu {
+            folderId: folderTileMenu.targetId
+        }
         MenuSeparator {
             padding: 4
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
@@ -406,19 +409,30 @@ Item {
                             }
                             Rectangle {
                                 height: 28
-                                width: crumbLabel.implicitWidth + 16
+                                width: crumbContent.implicitWidth + 16
                                 radius: Theme.radiusSmall
                                 color: crumbHover.hovered ? Theme.hover : "transparent"
                                 anchors.verticalCenter: parent.verticalCenter
                                 HoverHandler { id: crumbHover }
                                 TapHandler { onTapped: appStore.openFolder(crumb.modelData.id) }
-                                Text {
-                                    id: crumbLabel
+                                Row {
+                                    id: crumbContent
                                     anchors.centerIn: parent
-                                    text: crumb.modelData.name
-                                    color: Theme.text
-                                    font.pixelSize: Theme.fontSize
-                                    font.weight: crumb.modelData.id === appStore.currentFolderId ? Font.DemiBold : Font.Normal
+                                    spacing: 8
+                                    Icon {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        name: "fluent-folder-20-filled"
+                                        size: 18
+                                        color: crumb.modelData.color || Theme.folder
+                                    }
+                                    Text {
+                                        id: crumbLabel
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: crumb.modelData.name
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontSize
+                                        font.weight: crumb.modelData.id === appStore.currentFolderId ? Font.DemiBold : Font.Normal
+                                    }
                                 }
                             }
                         }
@@ -558,7 +572,8 @@ Item {
                                     visible: tile.isFolder || tile.isParent
                                     size: 54
                                     name: tile.isParent ? "fluent-folder-arrow-up-24-filled" : "fluent-folder-24-filled"
-                                    color: tile.isParent ? Theme.textTertiary : Theme.folder
+                                    color: tile.isParent ? Theme.textTertiary
+                                                         : tile.nodeColor.length > 0 ? tile.nodeColor : Theme.folder
                                 }
                                 // Default item icon: favicon for sites, typed glyph for terminals/files
                                 ItemIcon {
