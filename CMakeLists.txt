@@ -41,9 +41,33 @@ qt_add_executable(Silo
 )
 
 if(APPLE)
-    set(SILO_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/icons/logo/logo-1000.icns")
+    # Generate the .icns from logo-1000.png at build time so it always contains
+    # the full set of Retina (@2x) representations, whatever the committed logo.
+    set(SILO_MACOS_ICON_SRC "${CMAKE_CURRENT_SOURCE_DIR}/icons/logo/logo-1000.png")
+    set(SILO_MACOS_ICONSET "${CMAKE_CURRENT_BINARY_DIR}/logo-1000.iconset")
+    set(SILO_MACOS_ICON "${CMAKE_CURRENT_BINARY_DIR}/logo-1000.icns")
+    add_custom_command(
+        OUTPUT "${SILO_MACOS_ICON}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${SILO_MACOS_ICONSET}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SILO_MACOS_ICONSET}"
+        COMMAND sips -z 1024 1024 "${SILO_MACOS_ICON_SRC}" --out "${SILO_MACOS_ICONSET}/icon_512x512@2x.png"
+        COMMAND sips -z 512 512 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_512x512.png"
+        COMMAND sips -z 512 512 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_256x256@2x.png"
+        COMMAND sips -z 256 256 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_256x256.png"
+        COMMAND sips -z 256 256 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_128x128@2x.png"
+        COMMAND sips -z 128 128 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_128x128.png"
+        COMMAND sips -z 64 64 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_32x32@2x.png"
+        COMMAND sips -z 32 32 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_32x32.png"
+        COMMAND sips -z 32 32 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_16x16@2x.png"
+        COMMAND sips -z 16 16 "${SILO_MACOS_ICONSET}/icon_512x512@2x.png" --out "${SILO_MACOS_ICONSET}/icon_16x16.png"
+        COMMAND iconutil -c icns "${SILO_MACOS_ICONSET}" -o "${SILO_MACOS_ICON}"
+        DEPENDS "${SILO_MACOS_ICON_SRC}"
+        COMMENT "Generating logo-1000.icns with Retina variants"
+        VERBATIM
+    )
     set_source_files_properties("${SILO_MACOS_ICON}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
+        GENERATED TRUE
     )
     target_sources(Silo PRIVATE "${SILO_MACOS_ICON}")
 elseif(WIN32)

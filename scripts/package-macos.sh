@@ -191,7 +191,7 @@ then
 fi
 # Custom volume icon, after the Finder pass: changing the view options makes
 # Finder drop any .VolumeIcon.icns already there.
-cp "$ROOT_DIR/icons/logo/logo-1000.icns" "$MOUNT_DIR/.VolumeIcon.icns"
+cp "$APP/Contents/Resources/logo-1000.icns" "$MOUNT_DIR/.VolumeIcon.icns"
 SetFile -a C "$MOUNT_DIR" 2>/dev/null || true
 sync
 hdiutil detach "$MOUNT_DIR" >/dev/null || { sleep 3; hdiutil detach "$MOUNT_DIR" -force >/dev/null; }
