@@ -169,6 +169,16 @@ public:
                                   const QString &iconValue, const QString &color);
     Q_INVOKABLE void deleteNodes(const QVariantList &ids);
     Q_INVOKABLE void moveNodes(const QVariantList &ids, const QString &destinationId);
+    // Reordering. Moves the nodes into `destinationId` (empty = workspace root)
+    // right before the child `beforeId` (empty = at the end); nodes already in
+    // the destination are repositioned. The moved nodes keep their tree order.
+    Q_INVOKABLE void insertNodes(const QVariantList &ids, const QString &destinationId,
+                                 const QString &beforeId);
+    // Drops the nodes next to `anchorId`, as its siblings (before or after it).
+    Q_INVOKABLE void moveNodesRelative(const QVariantList &ids, const QString &anchorId, bool after);
+    // Leaf item ids of a workspace in tree (depth-first) order; used to keep the
+    // Live tabs in the same order as the sidebar.
+    QStringList itemOrder(const QString &workspaceId) const;
     // Deep-copies the nodes (folders with their whole subtree) into the destination
     // folder (empty id = workspace root). Returns the ids of the new top-level copies.
     Q_INVOKABLE QVariantList copyNodes(const QVariantList &ids, const QString &destinationId);
@@ -221,6 +231,11 @@ private:
     QList<NodePtr> *currentChildren();
     bool detachNode(const QString &id, QList<NodePtr> &nodes, NodePtr &result);
     bool contains(const NodePtr &node, const QString &id) const;
+    // Ids of every node of the workspace in depth-first order (folders included).
+    static void collectOrder(const QList<NodePtr> &nodes, QStringList &out, bool leavesOnly);
+    // Validates a move of `ids` into `destinationId` and returns the nodes to
+    // move, deduplicated and sorted by their current tree order. Empty if invalid.
+    QList<QString> movableNodes(const QVariantList &ids, const QString &destinationId, NodePtr &destination);
     void appendTreeRows(const QList<NodePtr> &nodes, int depth, QList<TreeModel::Row> &rows) const;
     void rebuildModels();
     void load();

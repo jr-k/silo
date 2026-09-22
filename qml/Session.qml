@@ -27,6 +27,15 @@ QtObject {
         sidebarVisible = !sidebarVisible
     }
 
+    // Organize directory layout: "grid" (tiles) or "list" (details rows).
+    property string dirViewMode: sessionStore.value("dirViewMode", "grid") === "list" ? "list" : "grid"
+    readonly property bool dirListMode: dirViewMode === "list"
+    onDirViewModeChanged: sessionStore.setValue("dirViewMode", dirViewMode)
+
+    function toggleDirViewMode() {
+        dirViewMode = dirListMode ? "grid" : "list"
+    }
+
     // Opens the settings dialog (owned by the sidebar's cog button) on a section.
     signal settingsRequested(string section)
     function openSettings(section) {

@@ -14,6 +14,15 @@ TabsModel::TabsModel(AppStore *store, SessionStore *session, const QString &work
 {
     connect(this, &TabsModel::countChanged, this, &TabsModel::persist);
     connect(this, &TabsModel::currentIndexChanged, this, &TabsModel::persist);
+    connect(this, &TabsModel::manualOrderChanged, this, &TabsModel::persist);
+    // Reordering the tree (sidebar / directory drag and drop) reorders the tabs
+    // as long as the user has not arranged them by hand.
+    if (store) {
+        connect(store, &AppStore::dataChanged, this, [this] {
+            if (!m_manualOrder)
+                sortByTree();
+        });
+    }
     restore();
 }
 
@@ -24,7 +33,7 @@ void TabsModel::persist() const
     QStringList ids;
     for (const auto &tab : m_tabs)
         ids.append(tab.nodeId);
-    m_session->setTabs(m_workspaceId, ids, m_currentIndex);
+    m_session->setTabs(m_workspaceId, ids, m_currentIndex, m_manualOrder);
     if (qEnvironmentVariableIsSet("SILO_DEBUG_TABS"))
         qDebug() << "tabs persist" << m_workspaceId << ids << m_currentIndex;
 }
@@ -41,6 +50,7 @@ void TabsModel::restore()
         for (const auto &value : saved.value(QStringLiteral("ids")).toArray())
             ids.append(value.toString());
         current = saved.value(QStringLiteral("current")).toInt(-1);
+        m_manualOrder = saved.value(QStringLiteral("manualOrder")).toBool(false);
     } else {
         // Tabs saved by earlier versions lived in QSettings: migrate them once.
         QSettings settings;
@@ -51,6 +61,9 @@ void TabsModel::restore()
     }
 
     m_restoring = true;
+    // The active tab is tracked by id: in tree order mode the tabs may not come
+    // back at their saved positions when the tree changed in between.
+    const QString currentId = current >= 0 && current < ids.size() ? ids.at(current) : QString();
     for (const QString &id : ids) {
         const QVariantMap info = m_store->nodeInfo(id);
         if (info.isEmpty() || info.value(QStringLiteral("folder")).toBool())
@@ -58,7 +71,8 @@ void TabsModel::restore()
         openTab(id, info.value(QStringLiteral("name")).toString(),
                 info.value(QStringLiteral("url")).toString(), false);
     }
-    setCurrentIndex(current);
+    const int restored = indexOfNode(currentId);
+    setCurrentIndex(restored >= 0 ? restored : current);
     m_restoring = false;
     persist(); // drop ids that no longer resolve (and complete the migration)
 }
@@ -119,15 +133,107 @@ int TabsModel::openTab(const QString &nodeId, const QString &title, const QStrin
 {
     int index = indexOfNode(nodeId);
     if (index < 0) {
-        index = int(m_tabs.size());
+        index = m_manualOrder ? int(m_tabs.size()) : orderedPosition(nodeId);
         beginInsertRows({}, index, index);
-        m_tabs.append({nodeId, title, url});
+        m_tabs.insert(index, {nodeId, title, url});
         endInsertRows();
+        if (m_currentIndex >= index) {
+            ++m_currentIndex;
+            emit currentIndexChanged();
+        }
         emit countChanged();
     }
     if (activate)
         setCurrentIndex(index);
     return index;
+}
+
+int TabsModel::orderedPosition(const QString &nodeId) const
+{
+    if (!m_store)
+        return int(m_tabs.size());
+    const QStringList order = m_store->itemOrder(m_workspaceId);
+    const qsizetype rank = order.indexOf(nodeId);
+    if (rank < 0)
+        return int(m_tabs.size()); // unknown item: at the end
+    for (qsizetype i = 0; i < m_tabs.size(); ++i) {
+        const qsizetype other = order.indexOf(m_tabs.at(i).nodeId);
+        if (other < 0 || other > rank)
+            return int(i);
+    }
+    return int(m_tabs.size());
+}
+
+void TabsModel::sortByTree()
+{
+    if (!m_store || m_tabs.size() < 2)
+        return;
+    const QStringList order = m_store->itemOrder(m_workspaceId);
+    // Stable: tabs whose item is gone (closed by the view right after) stay
+    // at the end in their current order.
+    QList<qsizetype> ranks;
+    ranks.reserve(m_tabs.size());
+    for (const auto &tab : m_tabs) {
+        const qsizetype rank = order.indexOf(tab.nodeId);
+        ranks.append(rank < 0 ? order.size() : rank);
+    }
+    // Selection sort with row moves so the delegates (live pages) survive.
+    for (int target = 0; target < int(m_tabs.size()); ++target) {
+        int best = target;
+        for (int i = target + 1; i < int(m_tabs.size()); ++i) {
+            if (ranks.at(i) < ranks.at(best))
+                best = i;
+        }
+        if (best == target)
+            continue;
+        beginMoveRows({}, best, best, {}, target);
+        m_tabs.move(best, target);
+        ranks.move(best, target);
+        endMoveRows();
+        if (m_currentIndex == best)
+            m_currentIndex = target;
+        else if (m_currentIndex >= target && m_currentIndex < best)
+            ++m_currentIndex;
+    }
+    // The active tab may sit at a new row now; QML bindings on currentIndex
+    // must re-evaluate even though the tab itself did not change.
+    emit currentIndexChanged();
+}
+
+void TabsModel::setManualOrder(bool manual)
+{
+    if (m_manualOrder == manual)
+        return;
+    m_manualOrder = manual;
+    emit manualOrderChanged();
+}
+
+void TabsModel::moveTab(int from, int to)
+{
+    if (from < 0 || from >= m_tabs.size() || to < 0 || to >= m_tabs.size())
+        return;
+    setManualOrder(true);
+    if (from == to)
+        return;
+    // QAbstractItemModel expresses the destination as "before row N" in the
+    // pre-move layout, hence the +1 when moving forward.
+    beginMoveRows({}, from, from, {}, to > from ? to + 1 : to);
+    m_tabs.move(from, to);
+    endMoveRows();
+    if (m_currentIndex == from)
+        m_currentIndex = to;
+    else if (from < m_currentIndex && to >= m_currentIndex)
+        --m_currentIndex;
+    else if (from > m_currentIndex && to <= m_currentIndex)
+        ++m_currentIndex;
+    emit currentIndexChanged();
+    persist();
+}
+
+void TabsModel::syncOrder()
+{
+    sortByTree();
+    setManualOrder(false);
 }
 
 void TabsModel::closeTab(int index)
@@ -204,7 +310,8 @@ bool TabsModel::reopenClosed()
         const QVariantMap info = m_store ? m_store->nodeInfo(closed.tab.nodeId) : QVariantMap();
         if (info.isEmpty() || info.value(QStringLiteral("folder")).toBool())
             continue;
-        const int index = qBound(0, closed.index, int(m_tabs.size()));
+        const int index = m_manualOrder ? qBound(0, closed.index, int(m_tabs.size()))
+                                        : orderedPosition(closed.tab.nodeId);
         beginInsertRows({}, index, index);
         m_tabs.insert(index, {closed.tab.nodeId, info.value(QStringLiteral("name")).toString(),
                               info.value(QStringLiteral("url")).toString()});

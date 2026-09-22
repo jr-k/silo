@@ -707,36 +707,55 @@ QVariantList AppStore::copyNodes(const QVariantList &ids, const QString &destina
     return created;
 }
 
-void AppStore::moveNodes(const QVariantList &ids, const QString &destinationId)
+QList<QString> AppStore::movableNodes(const QVariantList &ids, const QString &destinationId,
+                                      NodePtr &destination)
 {
+    destination.reset();
     QSet<QString> idSet;
     for (const auto &id : ids)
         idSet.insert(id.toString());
     if (idSet.isEmpty() || idSet.contains(destinationId))
-        return;
+        return {};
 
-    NodePtr destination;
     if (!destinationId.isEmpty()) {
         destination = findNode(destinationId);
-        if (!destination || !destination->folder)
-            return;
+        if (!destination || !destination->folder) {
+            destination.reset();
+            return {};
+        }
         for (const auto &id : idSet) {
             if (contains(findNode(id), destinationId))
-                return;
+                return {};
         }
     }
 
-    auto *workspace = currentWorkspace();
+    const auto *workspace = currentWorkspace();
     if (!workspace)
+        return {};
+
+    // Tree order, so a multi-selection keeps its relative arrangement wherever it lands.
+    QStringList order;
+    collectOrder(workspace->roots, order, false);
+    QList<QString> toMove;
+    for (const auto &id : order) {
+        if (idSet.contains(id))
+            toMove.append(id);
+    }
+    return toMove;
+}
+
+void AppStore::moveNodes(const QVariantList &ids, const QString &destinationId)
+{
+    NodePtr destination;
+    QList<QString> candidates = movableNodes(ids, destinationId, destination);
+    auto *workspace = currentWorkspace();
+    if (candidates.isEmpty() || !workspace)
         return;
 
-    // Keep the caller's order, drop duplicates, and skip nodes that already live
-    // in the destination so a drop on the current folder background is a no-op.
+    // Skip nodes that already live in the destination so a drop on the current
+    // folder background is a no-op.
     QList<QString> toMove;
-    for (const auto &value : ids) {
-        const QString id = value.toString();
-        if (toMove.contains(id) || !findNode(id))
-            continue;
+    for (const auto &id : candidates) {
         const auto parent = findParent(id);
         const QString parentId = parent ? parent->id : QString();
         if (parentId != destinationId)
@@ -757,6 +776,128 @@ void AppStore::moveNodes(const QVariantList &ids, const QString &destinationId)
         m_expandedIds.insert(destination->id);
     save();
     rebuildModels();
+}
+
+void AppStore::insertNodes(const QVariantList &ids, const QString &destinationId, const QString &beforeId)
+{
+    NodePtr destination;
+    const QList<QString> toMove = movableNodes(ids, destinationId, destination);
+    auto *workspace = currentWorkspace();
+    if (toMove.isEmpty() || !workspace)
+        return;
+
+    auto *target = destination ? &destination->children : &workspace->roots;
+
+    // The anchor must be a child of the destination that is not moving itself;
+    // when it is, slide forward to the next sibling that stays put.
+    QString anchor;
+    if (!beforeId.isEmpty()) {
+        qsizetype at = -1;
+        for (qsizetype i = 0; i < target->size(); ++i) {
+            if (target->at(i)->id == beforeId) {
+                at = i;
+                break;
+            }
+        }
+        if (at < 0)
+            return;
+        for (; at < target->size(); ++at) {
+            if (!toMove.contains(target->at(at)->id)) {
+                anchor = target->at(at)->id;
+                break;
+            }
+        }
+    }
+
+    // Already in place: nothing to do (and nothing to save).
+    bool unchanged = true;
+    {
+        qsizetype i = 0;
+        for (; i < target->size() && !toMove.contains(target->at(i)->id); ++i) {}
+        for (qsizetype k = 0; k < toMove.size(); ++k, ++i) {
+            if (i >= target->size() || target->at(i)->id != toMove.at(k)) {
+                unchanged = false;
+                break;
+            }
+        }
+        if (unchanged) {
+            const QString next = i < target->size() ? target->at(i)->id : QString();
+            unchanged = next == anchor;
+        }
+    }
+    if (unchanged)
+        return;
+
+    QList<NodePtr> moved;
+    for (const auto &id : toMove) {
+        NodePtr node;
+        if (detachNode(id, workspace->roots, node))
+            moved.append(node);
+    }
+
+    qsizetype position = target->size();
+    if (!anchor.isEmpty()) {
+        for (qsizetype i = 0; i < target->size(); ++i) {
+            if (target->at(i)->id == anchor) {
+                position = i;
+                break;
+            }
+        }
+    }
+    for (qsizetype k = 0; k < moved.size(); ++k)
+        target->insert(position + k, moved.at(k));
+
+    if (destination)
+        m_expandedIds.insert(destination->id);
+    save();
+    rebuildModels();
+}
+
+void AppStore::moveNodesRelative(const QVariantList &ids, const QString &anchorId, bool after)
+{
+    const auto anchor = findNode(anchorId);
+    if (!anchor)
+        return;
+    const auto parent = findParent(anchorId);
+    const QString destinationId = parent ? parent->id : QString();
+    const auto *workspace = currentWorkspace();
+    if (!workspace)
+        return;
+    const auto &siblings = parent ? parent->children : workspace->roots;
+
+    QString beforeId = anchorId;
+    if (after) {
+        beforeId.clear();
+        for (qsizetype i = 0; i < siblings.size(); ++i) {
+            if (siblings.at(i)->id == anchorId) {
+                if (i + 1 < siblings.size())
+                    beforeId = siblings.at(i + 1)->id;
+                break;
+            }
+        }
+    }
+    insertNodes(ids, destinationId, beforeId);
+}
+
+QStringList AppStore::itemOrder(const QString &workspaceId) const
+{
+    QStringList order;
+    for (const auto &workspace : m_workspaces) {
+        if (workspace.id == workspaceId) {
+            collectOrder(workspace.roots, order, true);
+            break;
+        }
+    }
+    return order;
+}
+
+void AppStore::collectOrder(const QList<NodePtr> &nodes, QStringList &out, bool leavesOnly)
+{
+    for (const auto &node : nodes) {
+        if (!leavesOnly || !node->folder)
+            out.append(node->id);
+        collectOrder(node->children, out, leavesOnly);
+    }
 }
 
 SiloWorkspace *AppStore::currentWorkspace()

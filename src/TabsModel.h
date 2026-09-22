@@ -20,6 +20,10 @@ class TabsModel final : public QAbstractListModel
     Q_PROPERTY(QString workspaceId READ workspaceId CONSTANT)
     // Tabs closed during this run, most recent first (for "reopen closed tab")
     Q_PROPERTY(int closedCount READ closedCount NOTIFY closedCountChanged)
+    // False: tabs follow the tree order (new tabs slot in at their tree position,
+    // reordering the tree reorders the tabs). True: the user dragged tabs around
+    // and their order is kept as is until syncOrder() is called.
+    Q_PROPERTY(bool manualOrder READ manualOrder NOTIFY manualOrderChanged)
 
 public:
     enum Roles { NodeIdRole = Qt::UserRole + 1, TitleRole, UrlRole };
@@ -61,14 +65,27 @@ public:
     // false when there is nothing left to reopen.
     Q_INVOKABLE bool reopenClosed();
 
+    bool manualOrder() const { return m_manualOrder; }
+    // Drag reordering: moves the tab at `from` so it ends up at `to`, and
+    // switches to manual order.
+    Q_INVOKABLE void moveTab(int from, int to);
+    // Puts the tabs back in tree order and follows the tree again.
+    Q_INVOKABLE void syncOrder();
+
 signals:
     void countChanged();
     void currentIndexChanged();
     void closedCountChanged();
+    void manualOrderChanged();
 
 private:
     void persist() const;
     void restore();
+    // Position a tab for `nodeId` should take to respect the tree order.
+    int orderedPosition(const QString &nodeId) const;
+    // Reorders the tabs to the tree order (rows are moved, never reset).
+    void sortByTree();
+    void setManualOrder(bool manual);
 
     QList<Tab> m_tabs;
     struct ClosedTab {
@@ -77,6 +94,7 @@ private:
     };
     QList<ClosedTab> m_closed; // most recent first, capped
     int m_currentIndex = -1;
+    bool m_manualOrder = false;
     AppStore *m_store = nullptr;
     SessionStore *m_session = nullptr;
     QString m_workspaceId;

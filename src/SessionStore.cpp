@@ -64,11 +64,12 @@ QJsonObject SessionStore::tabs(const QString &workspaceId) const
     return m_root.value(QStringLiteral("tabs")).toObject().value(workspaceId).toObject();
 }
 
-void SessionStore::setTabs(const QString &workspaceId, const QStringList &ids, int current)
+void SessionStore::setTabs(const QString &workspaceId, const QStringList &ids, int current, bool manualOrder)
 {
     QJsonObject all = m_root.value(QStringLiteral("tabs")).toObject();
     const QJsonObject entry{{QStringLiteral("ids"), QJsonArray::fromStringList(ids)},
-                            {QStringLiteral("current"), current}};
+                            {QStringLiteral("current"), current},
+                            {QStringLiteral("manualOrder"), manualOrder}};
     if (all.value(workspaceId) == entry)
         return;
     all.insert(workspaceId, entry);

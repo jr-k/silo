@@ -404,6 +404,27 @@ Item {
                 readonly property bool editing: sidebar.renamingId === nodeId
                 readonly property bool focused: sidebar.focusedId === nodeId && treeFocus.activeFocus
 
+                // Drop zone under the pointer: "before" / "after" reorder among the siblings,
+                // "into" (middle of a folder) moves into it. Dropping right after an
+                // expanded folder puts the nodes at the top of its children.
+                readonly property string dropZone: rowDrop.containsDrag ? zoneAt(rowDrop.drag.y) : ""
+                readonly property bool dropAsFirstChild: dropZone === "after" && isFolder && isExpanded && hasChildren
+                function zoneAt(y) {
+                    var pos = y / height
+                    if (isFolder)
+                        return pos < 0.25 ? "before" : pos > 0.75 ? "after" : "into"
+                    return pos < 0.5 ? "before" : "after"
+                }
+                function dropAt(y) {
+                    var zone = zoneAt(y)
+                    if (zone === "into")
+                        appStore.moveNodes(DragState.ids, nodeId)
+                    else if (zone === "after" && isFolder && isExpanded && hasChildren)
+                        appStore.insertNodes(DragState.ids, nodeId, appStore.treeNodeIdAt(index + 1))
+                    else
+                        appStore.moveNodesRelative(DragState.ids, nodeId, zone === "after")
+                }
+
                 // Click: focus the row; folders also navigate (Organize) or toggle (Live),
                 // items open a tab in Live mode.
                 function activate() {
@@ -424,7 +445,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: Theme.radiusSmall
-                    color: rowDrop.containsDrag ? Theme.dropTarget
+                    color: row.dropZone === "into" ? Theme.dropTarget
                          : row.isCurrent ? Theme.selection
                          : rowHover.hovered || row.focused ? Theme.hover : "transparent"
                     border.width: row.focused ? 1 : 0
@@ -619,11 +640,40 @@ Item {
                     onCentroidChanged: if (active) DragState.update(centroid.scenePosition)
                 }
 
+                // Insertion mark for a reorder drop: a line between the rows, indented to
+                // the level the nodes will land at.
+                Item {
+                    visible: row.dropZone === "before" || row.dropZone === "after"
+                    z: 3
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: 8 + (row.depth + (row.dropAsFirstChild ? 1 : 0)) * 16 + 4
+                    anchors.rightMargin: 8
+                    height: 2
+                    y: row.dropZone === "before" ? -1 : row.height - 1
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 1
+                        color: Theme.accent
+                    }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: -3
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: Theme.accent
+                    }
+                }
+
+                // Every row accepts drops: edges reorder among the siblings, the middle
+                // of a folder moves into it.
                 DropArea {
                     id: rowDrop
                     anchors.fill: parent
-                    enabled: row.isFolder && DragState.active && !DragState.contains(row.nodeId)
-                    onDropped: appStore.moveNodes(DragState.ids, row.nodeId)
+                    enabled: DragState.active && !DragState.contains(row.nodeId)
+                    onDropped: function(drop) { row.dropAt(drop.y) }
                 }
             }
         }

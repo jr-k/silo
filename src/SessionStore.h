@@ -19,9 +19,9 @@ public:
     Q_INVOKABLE void setValue(const QString &key, const QVariant &value);
     Q_INVOKABLE void remove(const QString &key);
 
-    // Tabs of one workspace: {"ids": [nodeId…], "current": index}
+    // Tabs of one workspace: {"ids": [nodeId…], "current": index, "manualOrder": bool}
     QJsonObject tabs(const QString &workspaceId) const;
-    void setTabs(const QString &workspaceId, const QStringList &ids, int current);
+    void setTabs(const QString &workspaceId, const QStringList &ids, int current, bool manualOrder);
     void forgetTabs(const QString &workspaceId);
 
     static QString filePath();

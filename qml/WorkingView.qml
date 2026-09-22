@@ -218,11 +218,26 @@ Item {
                 anchors.bottomMargin: 2
             }
 
+            // Tabs follow the tree order until the user drags one; this puts them
+            // back in tree order (and makes them follow it again).
+            IconButton {
+                id: syncOrderButton
+                anchors.left: sidebarToggle.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                iconName: "fluent-arrow-sort-20-regular"
+                iconSize: 18
+                enabled: !!root.tabsModel && root.tabsModel.manualOrder
+                iconColor: Theme.accent
+                tooltip: "Restore tab order from the tree"
+                onClicked: tabsModel.syncOrder()
+            }
+
             // Reload every loaded page of the workspace (web pages and files;
             // terminals are left alone, a reload would kill their shell)
             IconButton {
                 id: refreshAllButton
-                anchors.left: sidebarToggle.right
+                anchors.left: syncOrderButton.right
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 2
                 iconName: "fluent-arrow-clockwise-20-regular"
@@ -270,6 +285,10 @@ Item {
                     }
                 }
 
+                // Tabs slide when the model reorders them (drag, tree sync)
+                move: Transition { NumberAnimation { properties: "x"; duration: Theme.animationFast; easing.type: Easing.OutCubic } }
+                moveDisplaced: Transition { NumberAnimation { properties: "x"; duration: Theme.animationFast; easing.type: Easing.OutCubic } }
+
                 delegate: Item {
                     id: tab
                     required property int index
@@ -285,41 +304,51 @@ Item {
                     readonly property string nodeType: nodeInfo.type || "web"
                     readonly property bool hasFavicon: !customIcon && view && view.kind === "web" && String(view.icon).length > 0
 
+                    // Drag reordering: the wrapper stays where the ListView puts it while
+                    // `tabContent` follows the pointer; the row is moved in the model as
+                    // soon as the tab's centre crosses into a neighbouring slot.
+                    property bool dragging: false
+                    property real pressOffset: 0
+                    property real pointerStripX: 0
+                    readonly property real slot: width + tabStrip.spacing
+
                     width: 208
                     height: tabStrip.height
 
-                    Rectangle {
-                        id: tabBg
-                        anchors.fill: parent
-                        anchors.topMargin: 5
-                        anchors.bottomMargin: tab.active ? -1 : 3   // active tab merges with the card
-                        topLeftRadius: Theme.radiusLarge
-                        topRightRadius: Theme.radiusLarge
-                        bottomLeftRadius: tab.active ? 0 : Theme.radius
-                        bottomRightRadius: tab.active ? 0 : Theme.radius
-                        color: tab.active ? Theme.surface : tabHover.hovered ? Theme.hover : "transparent"
-                        border.width: tab.active ? 1 : 0
-                        border.color: Theme.border
-                        Behavior on color { ColorAnimation { duration: Theme.animationFast } }
-
-                        // Hide the bottom border of the active tab
-                        Rectangle {
-                            visible: tab.active
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.leftMargin: 1
-                            anchors.rightMargin: 1
-                            height: 2
-                            color: Theme.surface
-                        }
-                    }
-
                     HoverHandler { id: tabHover }
 
-                    TapHandler {
+                    // Below the content so the close button keeps its clicks.
+                    MouseArea {
+                        id: tabMouse
+                        anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
-                        onTapped: tabsModel.currentIndex = tab.index
+                        // The strip is a Flickable: keep the grab so a horizontal drag reorders
+                        // instead of flicking the list.
+                        preventStealing: true
+                        property point pressPos: Qt.point(0, 0)
+
+                        onPressed: function(mouse) {
+                            pressPos = Qt.point(mouse.x, mouse.y)
+                            tab.pressOffset = mouse.x
+                            tabsModel.currentIndex = tab.index
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (!pressed)
+                                return
+                            if (!tab.dragging) {
+                                var threshold = Application.styleHints.startDragDistance
+                                if (Math.abs(mouse.x - pressPos.x) < threshold && Math.abs(mouse.y - pressPos.y) < threshold)
+                                    return
+                                tab.dragging = true
+                            }
+                            tab.pointerStripX = tabStrip.mapFromItem(tab, mouse.x, mouse.y).x
+                            var centre = tab.pointerStripX + tabStrip.contentX - tab.pressOffset + tab.width / 2
+                            var target = Math.max(0, Math.min(tabsModel.count - 1, Math.floor(centre / tab.slot)))
+                            if (target !== tab.index)
+                                tabsModel.moveTab(tab.index, target)
+                        }
+                        onReleased: tab.dragging = false
+                        onCanceled: tab.dragging = false
                     }
                     TapHandler {
                         acceptedButtons: Qt.MiddleButton
@@ -333,79 +362,118 @@ Item {
                         }
                     }
 
-                    // Favicon (or spinner-ish dot while loading)
                     Item {
-                        id: favicon
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
-                        anchors.verticalCenter: tabBg.verticalCenter
-                        width: 16
-                        height: 16
-                        Badge {
-                            anchors.fill: parent
-                            visible: tab.customIcon
-                            size: 16
-                            color: tab.customIcon && tab.nodeInfo.color.length > 0 ? tab.nodeInfo.color : Theme.link
-                            iconType: tab.customIcon ? tab.nodeInfo.iconType : "emoji"
-                            iconValue: tab.customIcon ? tab.nodeInfo.iconValue : ""
+                        id: tabContent
+                        width: tab.width
+                        height: tab.height
+                        z: tab.dragging ? 2 : 0
+                        x: tab.dragging ? tab.pointerStripX + tabStrip.contentX - tab.x - tab.pressOffset : 0
+                        Behavior on x {
+                            enabled: !tab.dragging
+                            NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic }
                         }
-                        Image {
-                            anchors.fill: parent
-                            source: tab.hasFavicon ? tab.view.icon : ""
-                            visible: tab.hasFavicon && status === Image.Ready
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                            sourceSize: Qt.size(32, 32)
-                        }
-                        ItemIcon {
-                            anchors.fill: parent
-                            visible: !tab.customIcon && !tab.hasFavicon
-                            size: 16
-                            type: tab.nodeType
-                            url: tab.tabUrl
-                            opacity: tab.active ? 1 : 0.75
-                        }
+
                         Rectangle {
-                            visible: tab.view ? tab.view.loading : false
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: -2
-                            width: 7
-                            height: 7
-                            radius: 3.5
-                            color: Theme.accent
-                            border.width: 1
-                            border.color: Theme.surface
+                            id: tabBg
+                            anchors.fill: parent
+                            anchors.topMargin: 5
+                            anchors.bottomMargin: tab.active ? -1 : 3   // active tab merges with the card
+                            topLeftRadius: Theme.radiusLarge
+                            topRightRadius: Theme.radiusLarge
+                            bottomLeftRadius: tab.active ? 0 : Theme.radius
+                            bottomRightRadius: tab.active ? 0 : Theme.radius
+                            color: tab.active ? Theme.surface : tabHover.hovered || tab.dragging ? Theme.hover : "transparent"
+                            border.width: tab.active ? 1 : 0
+                            border.color: Theme.border
+                            Behavior on color { ColorAnimation { duration: Theme.animationFast } }
+
+                            // Hide the bottom border of the active tab
+                            Rectangle {
+                                visible: tab.active && !tab.dragging
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 1
+                                anchors.rightMargin: 1
+                                height: 2
+                                color: Theme.surface
+                            }
                         }
-                    }
 
-                    Text {
-                        anchors.left: favicon.right
-                        anchors.leftMargin: 8
-                        anchors.right: closeButton.left
-                        anchors.rightMargin: 4
-                        anchors.verticalCenter: tabBg.verticalCenter
-                        text: tab.tabTitle
-                        color: tab.active ? Theme.text : Theme.textSecondary
-                        font.pixelSize: Theme.fontSize
-                        font.weight: tab.active ? Font.DemiBold : Font.Normal
-                        elide: Text.ElideRight
-                    }
+                        // Favicon (or spinner-ish dot while loading)
+                        Item {
+                            id: favicon
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.verticalCenter: tabBg.verticalCenter
+                            width: 16
+                            height: 16
+                            Badge {
+                                anchors.fill: parent
+                                visible: tab.customIcon
+                                size: 16
+                                color: tab.customIcon && tab.nodeInfo.color.length > 0 ? tab.nodeInfo.color : Theme.link
+                                iconType: tab.customIcon ? tab.nodeInfo.iconType : "emoji"
+                                iconValue: tab.customIcon ? tab.nodeInfo.iconValue : ""
+                            }
+                            Image {
+                                anchors.fill: parent
+                                source: tab.hasFavicon ? tab.view.icon : ""
+                                visible: tab.hasFavicon && status === Image.Ready
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                sourceSize: Qt.size(32, 32)
+                            }
+                            ItemIcon {
+                                anchors.fill: parent
+                                visible: !tab.customIcon && !tab.hasFavicon
+                                size: 16
+                                type: tab.nodeType
+                                url: tab.tabUrl
+                                opacity: tab.active ? 1 : 0.75
+                            }
+                            Rectangle {
+                                visible: tab.view ? tab.view.loading : false
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: -2
+                                width: 7
+                                height: 7
+                                radius: 3.5
+                                color: Theme.accent
+                                border.width: 1
+                                border.color: Theme.surface
+                            }
+                        }
 
-                    IconButton {
-                        id: closeButton
-                        z: 1
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        anchors.verticalCenter: tabBg.verticalCenter
-                        width: 24
-                        height: 24
-                        iconName: "fluent-dismiss-16-regular"
-                        iconSize: 12
-                        iconColor: Theme.textSecondary
-                        opacity: tab.active || tabHover.hovered ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: Theme.animationFast } }
-                        onClicked: tabsModel.closeTab(tab.index)
+                        Text {
+                            anchors.left: favicon.right
+                            anchors.leftMargin: 8
+                            anchors.right: closeButton.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: tabBg.verticalCenter
+                            text: tab.tabTitle
+                            color: tab.active ? Theme.text : Theme.textSecondary
+                            font.pixelSize: Theme.fontSize
+                            font.weight: tab.active ? Font.DemiBold : Font.Normal
+                            elide: Text.ElideRight
+                        }
+
+                        IconButton {
+                            id: closeButton
+                            z: 1
+                            anchors.right: parent.right
+                            anchors.rightMargin: 6
+                            anchors.verticalCenter: tabBg.verticalCenter
+                            width: 24
+                            height: 24
+                            iconName: "fluent-dismiss-16-regular"
+                            iconSize: 12
+                            iconColor: Theme.textSecondary
+                            opacity: tab.active || tabHover.hovered ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: Theme.animationFast } }
+                            onClicked: tabsModel.closeTab(tab.index)
+                        }
                     }
                 }
             }
@@ -571,7 +639,20 @@ Item {
                             anchors.fill: parent
                             visible: tabsHub.currentWorkspaceId === workspaceId
 
+                            // A row move changes neither `count` nor any notified property, so bindings
+                            // that resolve a page through viewAt() would keep the item that sat at that
+                            // index before the move (wrong favicon / loading dot on the tab). Bump a
+                            // revision once the Repeater has reordered its items to re-resolve them.
+                            property int orderRevision: 0
+                            Connections {
+                                target: workspacePages.tabs
+                                function onRowsMoved() {
+                                    Qt.callLater(function() { workspacePages.orderRevision++ })
+                                }
+                            }
+
                             function viewAt(tabIndex) {
+                                var revision = workspacePages.orderRevision
                                 return tabIndex >= 0 && pageRepeater.count > tabIndex ? pageRepeater.itemAt(tabIndex) : null
                             }
 

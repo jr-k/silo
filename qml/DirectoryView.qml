@@ -15,7 +15,17 @@ Item {
     property rect marqueeRect: Qt.rect(0, 0, 0, 0)
     property var marqueeBase: []
 
+    // Layout: tiles (grid) or one full-width row per node (details list). Both share the same
+    // GridView so selection, marquee, drag & drop and rename behave identically.
+    readonly property bool listMode: Session.dirListMode
     readonly property int columns: Math.max(1, Math.floor(grid.width / grid.cellWidth))
+
+    // Details columns (x positions relative to a row): name | type | details
+    readonly property int listRowHeight: 34
+    readonly property int listHeaderHeight: 28
+    readonly property real listTypeWidth: 120
+    readonly property real listTypeX: Math.max(180, Math.round(grid.width * 0.45))
+    readonly property real listDetailsX: listTypeX + listTypeWidth + 12
     // Inside a sub-folder the model prepends a virtual ".." tile; item indices skip it.
     readonly property int gridOffset: appStore.currentFolderId !== "" ? 1 : 0
     readonly property int itemCount: Math.max(0, grid.count - gridOffset)
@@ -516,6 +526,16 @@ Item {
                 onClicked: root.deleteSelection()
             }
             Item { Layout.fillWidth: true }
+
+            // Grid / details layout toggle (shows the layout you switch to)
+            IconButton {
+                Layout.preferredWidth: 36
+                Layout.preferredHeight: 36
+                iconName: root.listMode ? "fluent-grid-20-regular" : "fluent-apps-list-20-regular"
+                iconSize: 18
+                tooltip: root.listMode ? "Grid view" : "Details view"
+                onClicked: Session.toggleDirViewMode()
+            }
         }
 
         // Content card
@@ -542,13 +562,59 @@ Item {
                     onDropped: appStore.moveNodes(DragState.ids, appStore.currentFolderId)
                 }
 
+                // Details header (list mode only)
+                Item {
+                    id: listHeader
+                    visible: root.listMode
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    anchors.topMargin: 6
+                    height: root.listHeaderHeight
+
+                    Text {
+                        x: 3 + 10 + 20 + 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Name"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        x: root.listTypeX
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Type"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        x: root.listDetailsX
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Details"
+                        color: Theme.textSecondary
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.weight: Font.DemiBold
+                    }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 1
+                        color: Theme.divider
+                    }
+                }
+
                 GridView {
                     id: grid
                     anchors.fill: parent
                     anchors.margins: 10
+                    anchors.topMargin: root.listMode ? root.listHeaderHeight + 10 : 10
                     clip: true
-                    cellWidth: 118
-                    cellHeight: 132
+                    cellWidth: root.listMode ? Math.max(1, width) : 118
+                    cellHeight: root.listMode ? root.listRowHeight : 132
                     model: appStore.directoryModel
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -569,12 +635,24 @@ Item {
                         readonly property bool isParent: nodeKind === "parent"
                         readonly property bool isFolder: nodeKind === "folder"
                         readonly property bool hasCustomIcon: !isFolder && !isParent && nodeIconType.length > 0
-                        readonly property bool isDropTarget: isFolder || isParent
                         // Index among real items (the virtual ".." tile is excluded).
                         readonly property int itemIndex: index - root.gridOffset
                         readonly property bool selected: !isParent && root.isSelected(nodeId)
                         readonly property bool renaming: !isParent && root.renamingId === nodeId
                         readonly property bool dragging: !isParent && DragState.active && DragState.contains(nodeId)
+
+                        // Drop zone under the pointer: "before" / "after" reorder among the
+                        // siblings, "into" moves into the folder (the whole ".." tile).
+                        // Grid tiles split left/right, list rows split top/bottom.
+                        readonly property string dropZone: tileDrop.containsDrag ? zoneAt(tileDrop.drag.x, tileDrop.drag.y) : ""
+                        function zoneAt(x, y) {
+                            if (isParent)
+                                return "into"
+                            var pos = list ? y / height : x / width
+                            if (isFolder)
+                                return pos < 0.25 ? "before" : pos > 0.75 ? "after" : "into"
+                            return pos < 0.5 ? "before" : "after"
+                        }
 
                         width: grid.cellWidth
                         height: grid.cellHeight
@@ -584,7 +662,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 3
                             radius: Theme.radius
-                            color: tileDrop.containsDrag ? Theme.dropTarget
+                            color: tile.dropZone === "into" ? Theme.dropTarget
                                  : tile.selected ? (tileHover.hovered ? Theme.selectionHover : Theme.selection)
                                  : tileHover.hovered ? Theme.hover : "transparent"
                             border.width: tile.selected || tile.isParent ? 1 : 0
@@ -593,109 +671,142 @@ Item {
                             Behavior on color { ColorAnimation { duration: 60 } }
                         }
 
-                        Column {
-                            anchors.top: tileCard.top
-                            anchors.topMargin: 10
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: tileCard.width - 12
-                            spacing: 6
+                        // Grid: icon on top, centered name + subtitle below.
+                        // List: icon | name | type | details on one row.
+                        readonly property bool list: root.listMode
+                        readonly property real listNameWidth: Math.max(40, root.listTypeX - 12 - tileName.x)
+                        readonly property string subtitleText: tile.isParent ? "Parent folder"
+                                                              : tile.isFolder
+                                                              ? tile.childCount + (tile.childCount === 1 ? " item" : " items")
+                                                              : ItemTypes.subtitle(tile.nodeType, tile.nodeUrl)
 
-                            Item {
-                                width: 56
-                                height: 56
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                Icon {
-                                    anchors.centerIn: parent
-                                    visible: tile.isFolder || tile.isParent
-                                    size: 54
-                                    name: tile.isParent ? "fluent-folder-arrow-up-24-filled" : "fluent-folder-24-filled"
-                                    color: tile.isParent ? Theme.textTertiary
-                                                         : tile.nodeColor.length > 0 ? tile.nodeColor : Theme.folder
-                                }
-                                // Default item icon: favicon for sites, typed glyph for terminals/files
-                                ItemIcon {
-                                    anchors.centerIn: parent
-                                    visible: !tile.isFolder && !tile.isParent && !tile.hasCustomIcon
-                                    size: 54
-                                    variant: "24"
-                                    imagePadding: 3
-                                    glyphPadding: 4
-                                    type: tile.nodeType
-                                    url: tile.nodeUrl
-                                }
-                                Badge {
-                                    anchors.centerIn: parent
-                                    visible: tile.hasCustomIcon
-                                    size: 50
-                                    color: tile.nodeColor.length > 0 ? tile.nodeColor : Theme.link
-                                    iconType: tile.nodeIconType
-                                    iconValue: tile.nodeIconValue
-                                }
+                        Item {
+                            id: iconBox
+                            width: tile.list ? 20 : 56
+                            height: width
+                            x: tile.list ? 13 : Math.round((tile.width - width) / 2)
+                            y: tile.list ? Math.round((tile.height - height) / 2) : 13
+
+                            Icon {
+                                anchors.centerIn: parent
+                                visible: tile.isFolder || tile.isParent
+                                size: tile.list ? 20 : 54
+                                name: tile.isParent ? "fluent-folder-arrow-up-24-filled" : "fluent-folder-24-filled"
+                                color: tile.isParent ? Theme.textTertiary
+                                                     : tile.nodeColor.length > 0 ? tile.nodeColor : Theme.folder
+                            }
+                            // Default item icon: favicon for sites, typed glyph for terminals/files
+                            ItemIcon {
+                                anchors.centerIn: parent
+                                visible: !tile.isFolder && !tile.isParent && !tile.hasCustomIcon
+                                size: tile.list ? 20 : 54
+                                variant: tile.list ? "20" : "24"
+                                imagePadding: tile.list ? 1 : 3
+                                glyphPadding: tile.list ? 1 : 4
+                                type: tile.nodeType
+                                url: tile.nodeUrl
+                            }
+                            Badge {
+                                anchors.centerIn: parent
+                                visible: tile.hasCustomIcon
+                                size: tile.list ? 20 : 50
+                                color: tile.nodeColor.length > 0 ? tile.nodeColor : Theme.link
+                                iconType: tile.nodeIconType
+                                iconValue: tile.nodeIconValue
+                            }
+                        }
+
+                        Text {
+                            id: tileName
+                            visible: !tile.renaming
+                            x: tile.list ? iconBox.x + iconBox.width + 10 : 9
+                            y: tile.list ? Math.round((tile.height - height) / 2) : iconBox.y + iconBox.height + 6
+                            width: tile.list ? tile.listNameWidth : tile.width - 18
+                            text: tile.nodeName
+                            color: tile.isParent ? Theme.textSecondary : Theme.text
+                            font.pixelSize: tile.isParent && !tile.list ? 16 : tile.list ? Theme.fontSize : Theme.fontSizeSmall
+                            font.weight: tile.isParent ? Font.Bold : Font.Normal
+                            horizontalAlignment: tile.list ? Text.AlignLeft : Text.AlignHCenter
+                            wrapMode: tile.list ? Text.NoWrap : Text.WrapAtWordBoundaryOrAnywhere
+                            maximumLineCount: tile.list ? 1 : 2
+                            elide: Text.ElideRight
+                        }
+
+                        // List-only columns
+                        Text {
+                            visible: tile.list && !tile.isParent
+                            x: root.listTypeX
+                            width: root.listTypeWidth
+                            height: tile.height
+                            verticalAlignment: Text.AlignVCenter
+                            text: tile.isFolder ? "Folder" : ItemTypes.label(tile.nodeType)
+                            color: Theme.textSecondary
+                            font.pixelSize: Theme.fontSizeSmall
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            visible: tile.list
+                            x: root.listDetailsX
+                            width: Math.max(0, tile.width - x - 18)
+                            height: tile.height
+                            verticalAlignment: Text.AlignVCenter
+                            text: tile.subtitleText
+                            color: Theme.textTertiary
+                            font.pixelSize: Theme.fontSizeSmall
+                            elide: Text.ElideRight
+                        }
+
+                        SiloTextField {
+                            id: tileRename
+                            visible: tile.renaming
+                            x: tileName.x
+                            y: tile.list ? Math.round((tile.height - height) / 2) : tileName.y
+                            width: tileName.width
+                            height: 26
+                            leftPadding: 6
+                            rightPadding: 6
+                            font.pixelSize: tile.list ? Theme.fontSize : Theme.fontSizeSmall
+                            horizontalAlignment: tile.list ? TextInput.AlignLeft : TextInput.AlignHCenter
+
+                            // renameNode resets the model (this delegate is destroyed),
+                            // so capture state and leave rename mode before calling it.
+                            function commit() {
+                                if (!tile.renaming)
+                                    return
+                                var id = tile.nodeId
+                                var value = text
+                                root.endRename()
+                                appStore.renameNode(id, value)
                             }
 
-                            Text {
-                                visible: !tile.renaming
-                                width: parent.width
-                                text: tile.nodeName
-                                color: tile.isParent ? Theme.textSecondary : Theme.text
-                                font.pixelSize: tile.isParent ? 16 : Theme.fontSizeSmall
-                                font.weight: tile.isParent ? Font.Bold : Font.Normal
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
+                            function startEditing() {
+                                text = tile.nodeName
+                                forceActiveFocus()
+                                select(text.length, 0)
                             }
 
-                            SiloTextField {
-                                id: tileRename
-                                visible: tile.renaming
-                                width: parent.width
-                                height: 26
-                                leftPadding: 6
-                                rightPadding: 6
-                                font.pixelSize: Theme.fontSizeSmall
-                                horizontalAlignment: TextInput.AlignHCenter
+                            // Handle Return here (auto-accepted) so it never bubbles up to the
+                            // view's "open selected folder" shortcut once editing has ended.
+                            Keys.onReturnPressed: commit()
+                            Keys.onEnterPressed: commit()
+                            Keys.onEscapePressed: root.endRename()
+                            // Focus moved elsewhere in the window: commit. Window deactivation keeps editing.
+                            onActiveFocusChanged: if (!activeFocus && Window.active) commit()
+                            onVisibleChanged: if (visible) startEditing()
+                            Component.onCompleted: if (visible) startEditing()
+                        }
 
-                                // renameNode resets the model (this delegate is destroyed),
-                                // so capture state and leave rename mode before calling it.
-                                function commit() {
-                                    if (!tile.renaming)
-                                        return
-                                    var id = tile.nodeId
-                                    var value = text
-                                    root.endRename()
-                                    appStore.renameNode(id, value)
-                                }
-
-                                function startEditing() {
-                                    text = tile.nodeName
-                                    forceActiveFocus()
-                                    select(text.length, 0)
-                                }
-
-                                // Handle Return here (auto-accepted) so it never bubbles up to the
-                                // view's "open selected folder" shortcut once editing has ended.
-                                Keys.onReturnPressed: commit()
-                                Keys.onEnterPressed: commit()
-                                Keys.onEscapePressed: root.endRename()
-                                // Focus moved elsewhere in the window: commit. Window deactivation keeps editing.
-                                onActiveFocusChanged: if (!activeFocus && Window.active) commit()
-                                onVisibleChanged: if (visible) startEditing()
-                                Component.onCompleted: if (visible) startEditing()
-                            }
-
-                            Text {
-                                visible: !tile.renaming
-                                width: parent.width
-                                text: tile.isParent ? "Parent folder"
-                                      : tile.isFolder
-                                      ? tile.childCount + (tile.childCount === 1 ? " item" : " items")
-                                      : ItemTypes.subtitle(tile.nodeType, tile.nodeUrl)
-                                color: Theme.textTertiary
-                                font.pixelSize: Theme.fontSizeCaption
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                            }
+                        // Grid-only subtitle under the name
+                        Text {
+                            visible: !tile.list && !tile.renaming
+                            x: 9
+                            y: tileName.y + tileName.height + 6
+                            width: tile.width - 18
+                            text: tile.subtitleText
+                            color: Theme.textTertiary
+                            font.pixelSize: Theme.fontSizeCaption
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
 
                         HoverHandler { id: tileHover }
@@ -789,12 +900,32 @@ Item {
                             }
                         }
 
-                        // Folders and the ".." tile accept drops; ".." moves into the parent folder.
+                        // Insertion mark for a reorder drop: a bar in the gap next to the tile
+                        // (grid) or a line above / below the row (list).
+                        Rectangle {
+                            visible: tile.dropZone === "before" || tile.dropZone === "after"
+                            z: 3
+                            color: Theme.accent
+                            radius: 1.5
+                            width: tile.list ? tile.width - 6 : 3
+                            height: tile.list ? 3 : tile.height - 12
+                            x: tile.list ? 3 : (tile.dropZone === "before" ? 0 : tile.width - 3)
+                            y: tile.list ? (tile.dropZone === "before" ? 0 : tile.height - 3) : 6
+                        }
+
+                        // Every tile accepts drops: edges reorder among the siblings, the
+                        // middle of a folder (and the whole ".." tile) moves into it.
                         DropArea {
                             id: tileDrop
                             anchors.fill: parent
-                            enabled: tile.isDropTarget && DragState.active && !DragState.contains(tile.nodeId)
-                            onDropped: appStore.moveNodes(DragState.ids, tile.nodeId)
+                            enabled: DragState.active && !DragState.contains(tile.nodeId)
+                            onDropped: function(drop) {
+                                var zone = tile.zoneAt(drop.x, drop.y)
+                                if (zone === "into")
+                                    appStore.moveNodes(DragState.ids, tile.nodeId)
+                                else
+                                    appStore.moveNodesRelative(DragState.ids, tile.nodeId, zone === "after")
+                            }
                         }
                     }
                 }

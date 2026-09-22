@@ -31,6 +31,7 @@ fluent:folder-open-20-regular
 fluent:globe-20-regular
 fluent:globe-24-filled
 fluent:grid-20-regular
+fluent:apps-list-20-regular
 fluent:home-20-regular
 fluent:image-add-20-regular
 fluent:link-20-regular
@@ -97,6 +98,7 @@ fluent:table-delete-column-20-regular
 fluent:edit-20-regular
 fluent:text-align-left-20-regular
 fluent:search-20-regular
+fluent:arrow-sort-20-regular
 fluent:arrow-sort-up-20-regular
 fluent:arrow-sort-down-20-regular
 fluent:arrow-export-20-regular
