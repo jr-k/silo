@@ -118,6 +118,46 @@ Item {
     }
     PasswordPopover { id: passwordPopover }
 
+    // "Close all" toolbar button: confirm first (⏎ confirms, Esc cancels).
+    SiloDialog {
+        id: closeAllDialog
+        width: 440
+        heading: "Close all tabs?"
+        subheading: root.tabCount + (root.tabCount === 1 ? " tab" : " tabs")
+                    + " of this workspace will be closed. They can be brought back one by one with Reopen closed tab."
+        initialFocusItem: confirmCloseAllButton
+
+        function confirm() {
+            closeAllDialog.close()
+            if (root.tabsModel)
+                root.tabsModel.closeAll()
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+            Keys.onReturnPressed: closeAllDialog.confirm()
+            Keys.onEnterPressed: closeAllDialog.confirm()
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                Item { Layout.fillWidth: true }
+                SiloButton {
+                    text: "Cancel"
+                    iconName: "fluent-dismiss-20-regular"
+                    onClicked: closeAllDialog.reject()
+                }
+                SiloButton {
+                    id: confirmCloseAllButton
+                    text: "Close all"
+                    iconName: "fluent-dismiss-square-multiple-20-regular"
+                    destructive: true
+                    onClicked: closeAllDialog.confirm()
+                }
+            }
+        }
+    }
+
     SiloMenu {
         id: tabMenu
         property int targetIndex: -1
@@ -153,6 +193,16 @@ Item {
             text: "Close other tabs"
             enabled: root.tabCount > 1
             onTriggered: tabsModel.closeOthers(tabMenu.targetIndex)
+        }
+        SiloMenuItem {
+            text: "Close tabs before"
+            enabled: tabMenu.targetIndex > 0
+            onTriggered: tabsModel.closeBefore(tabMenu.targetIndex)
+        }
+        SiloMenuItem {
+            text: "Close tabs after"
+            enabled: tabMenu.targetIndex >= 0 && tabMenu.targetIndex < root.tabCount - 1
+            onTriggered: tabsModel.closeAfter(tabMenu.targetIndex)
         }
         SiloMenuItem {
             text: "Close all tabs"
@@ -259,9 +309,21 @@ Item {
                 onClicked: root.openAllInBrowser()
             }
 
+            IconButton {
+                id: closeAllButton
+                anchors.left: openAllButton.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                iconName: "fluent-dismiss-square-multiple-20-regular"
+                iconSize: 18
+                enabled: root.tabCount > 0
+                tooltip: "Close all tabs"
+                onClicked: closeAllDialog.open()
+            }
+
             ListView {
                 id: tabStrip
-                anchors.left: openAllButton.right
+                anchors.left: closeAllButton.right
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom

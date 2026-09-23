@@ -31,7 +31,7 @@ Silo has a single mental model: workspaces contain folders, folders contain item
 
 **Organize** looks and behaves like Windows Explorer. Tiles on a grid, breadcrumbs, a `..` tile to move things up, shift- and ctrl-click selection, drag & drop between folders and into the sidebar, rename in place with <kbd>Space</kbd>, copy and paste whole sub-trees with <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd>.
 
-**Live** turns the same tree into a launcher. Click a leaf, it opens in a tab on the right. Tabs are kept per workspace, persisted to disk and restored on the next start (pages and files load right away, terminals reconnect when you switch to them), so a carefully laid-out set of dashboards, shells and documents is never lost.
+**Live** turns the same tree into a launcher. Double-click a leaf (or select several and press <kbd>Enter</kbd>), it opens in a tab on the right. Tabs are kept per workspace, persisted to disk and restored on the next start (pages and files load right away, terminals reconnect when you switch to them), so a carefully laid-out set of dashboards, shells and documents is never lost.
 
 <img src="docs/screenshots/live.png" alt="Live mode with a Grafana dashboard" width="900">
 
@@ -41,7 +41,7 @@ Silo has a single mental model: workspaces contain folders, folders contain item
 
 ## Open a whole folder at once
 
-<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+click a folder, or pick *Open all items* from its context menu. When the folder has sub-folders, Silo asks whether to include them.
+Pick *Open all items* from a folder's context menu. When the folder has sub-folders, Silo asks whether to include them.
 
 <img src="docs/screenshots/open-all.png" alt="Open all items dialog" width="900">
 
@@ -84,7 +84,7 @@ Browser extensions cannot run in an embedded browser, so Silo fills logins itsel
 
 - Light, dark, or follow the system. Every color is a token, so both themes are first-class.
 - Favicons are fetched and cached for web items; any item or workspace can get an emoji or a Fluent icon instead.
-- Full keyboard navigation in the tree: <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Tab</kbd> to expand or collapse, <kbd>Enter</kbd> to open, <kbd>Space</kbd> to rename, <kbd>Delete</kbd> to remove (with confirmation).
+- Full keyboard navigation in the tree: <kbd>↑</kbd>/<kbd>↓</kbd> to move (<kbd>Shift</kbd> extends the selection), <kbd>Tab</kbd> to expand or collapse, <kbd>Enter</kbd> to open, <kbd>Space</kbd> to rename, <kbd>Delete</kbd> to remove (with confirmation). <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>- and <kbd>Shift</kbd>-click select several rows.
 - <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>B</kbd> hides the sidebar. <kbd>Ctrl</kbd>+<kbd>Tab</kbd> cycles tabs (also <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>→</kbd>/<kbd>←</kbd> on macOS), <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps to one, <kbd>Ctrl</kbd>+<kbd>W</kbd> closes one, <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> reopens the last closed one.
 - Web tabs keep their sessions between launches.
 - No account, no server. Your library is a `library.json` you can read, diff and back up.

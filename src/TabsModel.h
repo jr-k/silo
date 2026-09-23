@@ -53,6 +53,9 @@ public:
                             bool activate = true);
     Q_INVOKABLE void closeTab(int index);
     Q_INVOKABLE void closeOthers(int index);
+    // Closes the tabs on the left / right of `index` (the tab itself stays open).
+    Q_INVOKABLE void closeBefore(int index);
+    Q_INVOKABLE void closeAfter(int index);
     Q_INVOKABLE void closeAll();
     Q_INVOKABLE int indexOfNode(const QString &nodeId) const;
     Q_INVOKABLE QString nodeIdAt(int index) const;

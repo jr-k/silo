@@ -5,23 +5,36 @@ import QtQuick.Layouts
 Item {
     id: sidebar
     property string renamingId: ""
-    // Keyboard focus in the tree (independent from the "current folder" highlight).
+    // Keyboard cursor in the tree (independent from the "current folder" highlight).
     property string focusedId: ""
+    // Multi-selection over the visible rows: Ctrl/Cmd+click cherry-picks, Shift+click
+    // ranges from `anchorId` (the last row picked without Shift).
+    property var selectedIds: []
+    property string anchorId: ""
     property alias switcher: workspaceSwitcher
     // Tabs of the current workspace (each workspace keeps its own live set).
     readonly property var tabsModel: tabsHub.current
 
     ItemDialog { id: sidebarItemDialog }
     OpenAllDialog { id: openAllDialog }
+    BulkIconDialog {
+        id: bulkIconDialog
+        onClosed: treeFocus.forceActiveFocus()
+    }
     DeleteDialog {
         id: deleteDialog
         onConfirmed: function(ids) {
-            // Move keyboard focus to the neighbour before the row disappears.
-            var index = appStore.treeIndexOf(ids[0])
+            // Move the cursor to the neighbour of the first row before they disappear.
+            var index = tree.count
+            for (var i = 0; i < ids.length; ++i) {
+                var at = appStore.treeIndexOf(ids[i])
+                if (at >= 0)
+                    index = Math.min(index, at)
+            }
             appStore.deleteNodes(ids)
+            sidebar.clearSelection()
             var count = tree.count
-            var nextId = count > 0 ? appStore.treeNodeIdAt(Math.min(index, count - 1)) : ""
-            sidebar.focusedId = nextId
+            sidebar.focusedId = count > 0 ? appStore.treeNodeIdAt(Math.min(index, count - 1)) : ""
         }
         // Refocus once the popup is fully closed, otherwise its exit transition steals focus back.
         onClosed: treeFocus.forceActiveFocus()
@@ -34,19 +47,141 @@ Item {
     function exportWorkspace(id) { workspaceSwitcher.exportWorkspace(id) }
     function importWorkspace() { workspaceSwitcher.importWorkspace() }
 
-    // Delete / Backspace, context menus: confirm first.
-    function requestDelete(id) {
-        if (id && id.length > 0)
-            deleteDialog.openFor([id])
+    // An in-place rename does not survive the switch to Live mode.
+    Connections {
+        target: Session
+        function onModeChanged() {
+            if (Session.working)
+                sidebar.renamingId = ""
+        }
     }
 
-    // Ctrl+C on the focused row; Ctrl+V pastes into the focused folder (or next to a focused item).
-    function copyFocused() {
-        if (focusedId.length > 0)
-            Session.copy([focusedId])
+    // Selection ids belong to a workspace: drop them when it changes.
+    Connections {
+        target: appStore
+        function onCurrentWorkspaceChanged() {
+            sidebar.clearSelection()
+            sidebar.focusedId = ""
+            sidebar.renamingId = ""
+        }
+    }
+
+    // ---- selection ------------------------------------------------------------
+    function isSelected(id) {
+        return selectedIds.indexOf(id) >= 0
+    }
+
+    function selectOnly(id) {
+        selectedIds = [id]
+        anchorId = id
+        focusNode(id)
+    }
+
+    function toggleSelection(id) {
+        var next = selectedIds.slice()
+        var at = next.indexOf(id)
+        if (at >= 0)
+            next.splice(at, 1)
+        else
+            next.push(id)
+        selectedIds = next
+        anchorId = id
+        focusNode(id)
+    }
+
+    // Range over the visible rows, from the anchor to `toId` (folders and their
+    // unfolded children included, like a flat list).
+    function selectRange(toId) {
+        var to = appStore.treeIndexOf(toId)
+        if (to < 0)
+            return
+        var from = anchorId.length > 0 ? appStore.treeIndexOf(anchorId) : -1
+        if (from < 0) {
+            anchorId = toId
+            from = to
+        }
+        var lo = Math.min(from, to)
+        var hi = Math.max(from, to)
+        var next = []
+        for (var i = lo; i <= hi; ++i)
+            next.push(appStore.treeNodeIdAt(i))
+        selectedIds = next
+        focusNode(toId)
+    }
+
+    function selectAll() {
+        var next = []
+        for (var i = 0; i < tree.count; ++i)
+            next.push(appStore.treeNodeIdAt(i))
+        selectedIds = next
+    }
+
+    function clearSelection() {
+        selectedIds = []
+        anchorId = ""
+    }
+
+    // The selection, or the cursor row when nothing is selected (keyboard shortcuts).
+    function targetIds() {
+        if (selectedIds.length > 0)
+            return selectedIds
+        return focusedId.length > 0 ? [focusedId] : []
+    }
+
+    // Selected rows whose ancestors are not selected themselves: a folder brings its
+    // subtree along when moved, copied or deleted, so nested picks would double up.
+    function topLevelTargets() {
+        var ids = targetIds()
+        return ids.filter(function(id) {
+            for (var parent = appStore.parentIdOf(id); parent.length > 0; parent = appStore.parentIdOf(parent)) {
+                if (ids.indexOf(parent) >= 0)
+                    return false
+            }
+            return true
+        })
+    }
+
+    // Leaf items in the selection (folders have no tab to open, no icon to bulk-edit).
+    readonly property var selectedItems: {
+        var revision = appStore.revision
+        var items = []
+        for (var i = 0; i < selectedIds.length; ++i) {
+            var info = appStore.nodeInfo(selectedIds[i])
+            if (info.id && !info.folder)
+                items.push(info)
+        }
+        return items
+    }
+    readonly property int selectedItemCount: selectedItems.length
+    readonly property bool canBulkEditIcon: selectedIds.length > 1 && selectedItemCount > 0
+    readonly property string bulkIconLabel: "Edit icon of " + selectedItemCount + (selectedItemCount > 1 ? " items…" : " item…")
+
+    function editSelectionIcon() {
+        if (canBulkEditIcon)
+            bulkIconDialog.openFor(selectedIds)
+    }
+
+    // Delete / Backspace, context menus: confirm first. Nothing is edited from Live mode.
+    function requestDelete() {
+        if (Session.working)
+            return
+        var ids = topLevelTargets()
+        if (ids.length > 0)
+            deleteDialog.openFor(ids)
+    }
+
+    // Ctrl+C on the selection; Ctrl+V pastes into the focused folder (or next to a focused item).
+    function copySelection() {
+        if (Session.working)
+            return
+        var ids = topLevelTargets()
+        if (ids.length > 0)
+            Session.copy(ids)
     }
 
     function pasteAtFocused() {
+        if (Session.working)
+            return
         var info = focusedInfo()
         var target = info.id ? (info.folder ? info.id : appStore.parentIdOf(info.id)) : ""
         pasteInto(target)
@@ -54,8 +189,11 @@ Item {
 
     function pasteInto(folderId) {
         var created = Session.pasteInto(folderId)
-        if (created.length > 0)
+        if (created.length > 0) {
+            selectedIds = created
+            anchorId = created[0]
             focusNode(created[0])
+        }
     }
 
     // ---- keyboard navigation -------------------------------------------------
@@ -67,14 +205,19 @@ Item {
             tree.positionViewAtIndex(index, ListView.Contain)
     }
 
-    function moveFocus(step) {
+    // ↑/↓ select the neighbour row; with Shift the selection extends from the anchor.
+    function moveFocus(step, extend) {
         var count = tree.count
         if (count === 0)
             return
         var index = appStore.treeIndexOf(focusedId)
         var next = index < 0 ? (step > 0 ? 0 : count - 1)
                              : Math.max(0, Math.min(count - 1, index + step))
-        focusNode(appStore.treeNodeIdAt(next))
+        var id = appStore.treeNodeIdAt(next)
+        if (extend)
+            selectRange(id)
+        else
+            selectOnly(id)
     }
 
     function focusedInfo() {
@@ -88,27 +231,25 @@ Item {
             appStore.toggleExpanded(info.id)
     }
 
-    // Return: folders go to the directory view (Organize) or toggle (Live);
-    // items open the edit dialog (Organize) or a tab (Live).
+    // Return: Live opens the selected items in tabs; Organize goes to the focused
+    // folder (directory view) or opens the focused item's edit dialog.
     function activateFocused() {
+        if (Session.working) {
+            openSelection(focusedId)
+            return
+        }
         var info = focusedInfo()
         if (!info.id)
             return
-        if (info.folder) {
-            if (Session.working)
-                appStore.toggleExpanded(info.id)
-            else
-                appStore.openFolder(info.id)
-        } else if (Session.working) {
-            tabsModel.openTab(info.id, info.name, info.url, true)
-        } else {
+        if (info.folder)
+            appStore.openFolder(info.id)
+        else
             sidebarItemDialog.openForEdit(info.id)
-        }
     }
 
-    // Space: rename in place.
+    // Space: rename in place (Organize only).
     function renameFocused() {
-        if (focusedId.length > 0)
+        if (!Session.working && focusedId.length > 0)
             renamingId = focusedId
     }
 
@@ -123,7 +264,7 @@ Item {
         }
         var parentId = appStore.parentIdOf(info.id)
         if (parentId.length > 0)
-            focusNode(parentId)
+            selectOnly(parentId)
     }
 
     // Right: expand, or step into the first child when already expanded.
@@ -138,25 +279,62 @@ Item {
         var index = appStore.treeIndexOf(info.id)
         var childId = appStore.treeNodeIdAt(index + 1)
         if (childId.length > 0 && appStore.parentIdOf(childId) === info.id)
-            focusNode(childId)
+            selectOnly(childId)
     }
 
-    // Open a leaf in a tab (switching to Live mode).
-    function openItemInTab(id, name, url, activate) {
-        Session.setMode("working")
-        tabsModel.openTab(id, name, url, activate === undefined ? true : activate)
-    }
-
-    // Ctrl/Cmd+click on a folder: open its direct items, no questions asked.
-    function openFolderDirect(id) {
-        var items = appStore.collectItems(id, false)
-        if (items.length === 0)
+    // Live only: opens every selected leaf in a tab; `preferredId` is the row that was
+    // activated and becomes the current tab. With nothing to open, a folder under the
+    // cursor folds / unfolds instead.
+    function openSelection(preferredId) {
+        if (!Session.working)
             return
-        Session.setMode("working")
-        for (var i = 0; i < items.length; ++i)
-            tabsModel.openTab(items[i].id, items[i].name, items[i].url, i === 0)
+        var ids = targetIds()
+        if (ids.length === 0 && preferredId)
+            ids = [preferredId]
+        var items = []
+        for (var i = 0; i < ids.length; ++i) {
+            var info = appStore.nodeInfo(ids[i])
+            if (info.id && !info.folder)
+                items.push(info)
+        }
+        if (items.length === 0) {
+            var folder = appStore.nodeInfo(preferredId || focusedId)
+            if (folder.folder)
+                appStore.toggleExpanded(folder.id)
+            return
+        }
+        var activeId = items[0].id
+        for (var j = 0; j < items.length; ++j) {
+            if (items[j].id === preferredId)
+                activeId = preferredId
+        }
+        for (var k = 0; k < items.length; ++k)
+            tabsModel.openTab(items[k].id, items[k].name, items[k].url, items[k].id === activeId)
     }
 
+    // Live mode is a launcher: the tree is read-only there, so its menus only open things.
+    SiloMenu {
+        id: liveFolderMenu
+        property string targetId: ""
+        property string targetName: ""
+        SiloMenuItem {
+            text: "Open all items…"
+            iconName: "fluent-tab-desktop-multiple-20-regular"
+            onTriggered: openAllDialog.openFor(liveFolderMenu.targetId, liveFolderMenu.targetName)
+        }
+    }
+
+    SiloMenu {
+        id: liveItemMenu
+        property string targetId: ""
+        SiloMenuItem {
+            text: sidebar.selectedItemCount > 1 ? "Open " + sidebar.selectedItemCount + " items in tabs" : "Open in tab"
+            iconName: "fluent-window-20-regular"
+            onTriggered: sidebar.openSelection(liveItemMenu.targetId)
+        }
+    }
+
+    // Organize mode menus (edit, rename, copy / paste, delete…)
     SiloMenu {
         id: folderMenu
         property string targetId: ""
@@ -164,14 +342,7 @@ Item {
         SiloMenuItem {
             text: "Open"
             iconName: "fluent-folder-open-20-regular"
-            visible: !Session.working
-            height: visible ? implicitHeight : 0
             onTriggered: appStore.openFolder(folderMenu.targetId)
-        }
-        SiloMenuItem {
-            text: "Open all items…"
-            iconName: "fluent-tab-desktop-multiple-20-regular"
-            onTriggered: openAllDialog.openFor(folderMenu.targetId, folderMenu.targetName)
         }
         SiloMenuItem {
             text: "Rename"
@@ -181,14 +352,21 @@ Item {
         FolderColorMenu {
             folderId: folderMenu.targetId
         }
+        SiloMenuItem {
+            visible: sidebar.canBulkEditIcon
+            height: visible ? implicitHeight : 0
+            text: sidebar.bulkIconLabel
+            iconName: "fluent-emoji-20-regular"
+            onTriggered: sidebar.editSelectionIcon()
+        }
         MenuSeparator {
             padding: 4
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
         }
         SiloMenuItem {
-            text: "Copy"
+            text: sidebar.selectedIds.length > 1 ? "Copy " + sidebar.selectedIds.length + " items" : "Copy"
             iconName: "fluent-copy-20-regular"
-            onTriggered: Session.copy([folderMenu.targetId])
+            onTriggered: sidebar.copySelection()
         }
         SiloMenuItem {
             text: "Paste into folder"
@@ -201,27 +379,27 @@ Item {
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
         }
         SiloMenuItem {
-            text: "Delete"
+            text: sidebar.selectedIds.length > 1 ? "Delete " + sidebar.selectedIds.length + " items" : "Delete"
             iconName: "fluent-delete-20-regular"
             destructive: true
-            onTriggered: sidebar.requestDelete(folderMenu.targetId)
+            onTriggered: sidebar.requestDelete()
         }
     }
 
     SiloMenu {
         id: itemMenu
         property string targetId: ""
-        property string targetName: ""
-        property string targetUrl: ""
-        SiloMenuItem {
-            text: "Open in tab"
-            iconName: "fluent-window-20-regular"
-            onTriggered: sidebar.openItemInTab(itemMenu.targetId, itemMenu.targetName, itemMenu.targetUrl)
-        }
         SiloMenuItem {
             text: "Edit…"
             iconName: "fluent-edit-20-regular"
             onTriggered: sidebarItemDialog.openForEdit(itemMenu.targetId)
+        }
+        SiloMenuItem {
+            visible: sidebar.canBulkEditIcon
+            height: visible ? implicitHeight : 0
+            text: sidebar.bulkIconLabel
+            iconName: "fluent-emoji-20-regular"
+            onTriggered: sidebar.editSelectionIcon()
         }
         SiloMenuItem {
             text: "Rename"
@@ -233,19 +411,19 @@ Item {
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
         }
         SiloMenuItem {
-            text: "Copy"
+            text: sidebar.selectedIds.length > 1 ? "Copy " + sidebar.selectedIds.length + " items" : "Copy"
             iconName: "fluent-copy-20-regular"
-            onTriggered: Session.copy([itemMenu.targetId])
+            onTriggered: sidebar.copySelection()
         }
         MenuSeparator {
             padding: 4
             contentItem: Rectangle { implicitHeight: 1; color: Theme.divider }
         }
         SiloMenuItem {
-            text: "Delete"
+            text: sidebar.selectedIds.length > 1 ? "Delete " + sidebar.selectedIds.length + " items" : "Delete"
             iconName: "fluent-delete-20-regular"
             destructive: true
-            onTriggered: sidebar.requestDelete(itemMenu.targetId)
+            onTriggered: sidebar.requestDelete()
         }
     }
 
@@ -341,21 +519,25 @@ Item {
             Layout.bottomMargin: 8
             activeFocusOnTab: false
 
-            // Keyboard: ↑/↓ move, Tab toggles a folder, ⏎ activates, Space renames, ←/→ fold/unfold.
-            Keys.onUpPressed: sidebar.moveFocus(-1)
-            Keys.onDownPressed: sidebar.moveFocus(1)
+            // Keyboard: ↑/↓ select (Shift extends), Tab toggles a folder, ⏎ activates,
+            // Space renames, ←/→ fold/unfold, Delete removes, Ctrl+A/C/V.
+            Keys.onUpPressed: function(event) { sidebar.moveFocus(-1, (event.modifiers & Qt.ShiftModifier) !== 0) }
+            Keys.onDownPressed: function(event) { sidebar.moveFocus(1, (event.modifiers & Qt.ShiftModifier) !== 0) }
             Keys.onTabPressed: sidebar.toggleFocused()
             Keys.onBacktabPressed: sidebar.toggleFocused()
             Keys.onReturnPressed: sidebar.activateFocused()
             Keys.onEnterPressed: sidebar.activateFocused()
             Keys.onSpacePressed: sidebar.renameFocused()
-            Keys.onDeletePressed: sidebar.requestDelete(sidebar.focusedId)
+            Keys.onDeletePressed: sidebar.requestDelete()
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Backspace) {
-                    sidebar.requestDelete(sidebar.focusedId)
+                    sidebar.requestDelete()
+                    event.accepted = true
+                } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier)) {
+                    sidebar.selectAll()
                     event.accepted = true
                 } else if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) {
-                    sidebar.copyFocused()
+                    sidebar.copySelection()
                     event.accepted = true
                 } else if (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier)) {
                     sidebar.pasteAtFocused()
@@ -364,7 +546,10 @@ Item {
             }
             Keys.onLeftPressed: sidebar.collapseOrParent()
             Keys.onRightPressed: sidebar.expandOrChild()
-            Keys.onEscapePressed: sidebar.focusedId = ""
+            Keys.onEscapePressed: {
+                sidebar.clearSelection()
+                sidebar.focusedId = ""
+            }
 
         ListView {
             id: tree
@@ -402,7 +587,10 @@ Item {
                 readonly property bool isOpenTab: Session.working && !isFolder && !!tabsModel
                                                   && tabsModel.count > 0 && tabsModel.indexOfNode(nodeId) >= 0
                 readonly property bool editing: sidebar.renamingId === nodeId
+                readonly property bool selected: sidebar.isSelected(nodeId)
                 readonly property bool focused: sidebar.focusedId === nodeId && treeFocus.activeFocus
+                // Live mode: the tree order drives the tab order, so no drag reordering from here.
+                readonly property bool canDrag: !editing && !Session.working
 
                 // Drop zone under the pointer: "before" / "after" reorder among the siblings,
                 // "into" (middle of a folder) moves into it. Dropping right after an
@@ -425,18 +613,36 @@ Item {
                         appStore.moveNodesRelative(DragState.ids, nodeId, zone === "after")
                 }
 
-                // Click: focus the row; folders also navigate (Organize) or toggle (Live),
-                // items open a tab in Live mode.
-                function activate() {
-                    sidebar.focusNode(nodeId)
-                    if (Session.working) {
-                        if (isFolder)
-                            appStore.toggleExpanded(nodeId)
-                        else
-                            tabsModel.openTab(nodeId, nodeName, nodeUrl, true)
-                    } else if (isFolder) {
+                // Plain click: select the row (folders also navigate in Organize mode). A row
+                // that is part of a multi-selection keeps it until the double-click window has
+                // passed, so a double-click can act on the whole selection.
+                function click() {
+                    if (selected && sidebar.selectedIds.length > 1)
+                        reduceTimer.restart()
+                    else
+                        sidebar.selectOnly(nodeId)
+                    if (!Session.working && isFolder)
                         appStore.openFolder(nodeId)
+                }
+
+                // Double-click: Live opens the selected items in tabs, Organize opens the item's
+                // edit dialog; folders fold / unfold.
+                function open() {
+                    reduceTimer.stop()
+                    if (Session.working)
+                        sidebar.openSelection(nodeId)
+                    else if (isFolder) {
+                        if (hasChildren)
+                            appStore.toggleExpanded(nodeId)
+                    } else {
+                        sidebarItemDialog.openForEdit(nodeId)
                     }
+                }
+
+                Timer {
+                    id: reduceTimer
+                    interval: Application.styleHints.mouseDoubleClickInterval
+                    onTriggered: sidebar.selectOnly(row.nodeId)
                 }
 
                 width: tree.width
@@ -446,10 +652,11 @@ Item {
                     anchors.fill: parent
                     radius: Theme.radiusSmall
                     color: row.dropZone === "into" ? Theme.dropTarget
+                         : row.selected ? (rowHover.hovered ? Theme.selectionHover : Theme.selection)
                          : row.isCurrent ? Theme.selection
                          : rowHover.hovered || row.focused ? Theme.hover : "transparent"
-                    border.width: row.focused ? 1 : 0
-                    border.color: Theme.accent
+                    border.width: row.selected || row.focused ? 1 : 0
+                    border.color: row.focused ? Theme.accent : Theme.selectionBorder
                     opacity: DragState.active && DragState.contains(row.nodeId) ? 0.5 : 1
                 }
 
@@ -593,49 +800,57 @@ Item {
                     acceptedButtons: Qt.LeftButton
                     acceptedModifiers: Qt.NoModifier
                     enabled: !row.editing
-                    onTapped: row.activate()
-                    onDoubleTapped: if (!Session.working && row.isFolder && row.hasChildren) appStore.toggleExpanded(row.nodeId)
+                    onSingleTapped: row.click()
+                    onDoubleTapped: row.open()
                 }
 
-                // Ctrl (Cmd on macOS) + click: open every item of the folder / open item in a background tab.
+                // Ctrl (Cmd on macOS) + click: cherry-pick the row in / out of the selection.
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
                     acceptedModifiers: Qt.ControlModifier
                     enabled: !row.editing
-                    onTapped: {
-                        if (row.isFolder)
-                            sidebar.openFolderDirect(row.nodeId)
-                        else
-                            sidebar.openItemInTab(row.nodeId, row.nodeName, row.nodeUrl, false)
-                    }
+                    onSingleTapped: sidebar.toggleSelection(row.nodeId)
+                }
+
+                // Shift + click: select the range from the anchor row.
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    acceptedModifiers: Qt.ShiftModifier
+                    enabled: !row.editing
+                    onSingleTapped: sidebar.selectRange(row.nodeId)
                 }
 
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: {
-                        sidebar.focusNode(row.nodeId)
-                        if (row.isFolder) {
-                            folderMenu.targetId = row.nodeId
-                            folderMenu.targetName = row.nodeName
-                            folderMenu.popup()
-                        } else {
-                            itemMenu.targetId = row.nodeId
-                            itemMenu.targetName = row.nodeName
-                            itemMenu.targetUrl = row.nodeUrl
-                            itemMenu.popup()
-                        }
+                        reduceTimer.stop()
+                        if (row.selected)
+                            sidebar.focusNode(row.nodeId)
+                        else
+                            sidebar.selectOnly(row.nodeId)
+                        var menu = row.isFolder ? (Session.working ? liveFolderMenu : folderMenu)
+                                                : (Session.working ? liveItemMenu : itemMenu)
+                        menu.targetId = row.nodeId
+                        if (row.isFolder)
+                            menu.targetName = row.nodeName
+                        menu.popup()
                     }
                 }
 
+                // Dragging a selected row carries the whole selection along.
                 DragHandler {
                     id: rowDrag
                     target: null
-                    enabled: !row.editing
+                    enabled: row.canDrag
                     onActiveChanged: {
-                        if (active)
-                            DragState.begin([row.nodeId], row.nodeName, row.nodeKind, centroid.scenePosition)
-                        else
+                        if (active) {
+                            reduceTimer.stop()
+                            if (!row.selected)
+                                sidebar.selectOnly(row.nodeId)
+                            DragState.begin(sidebar.topLevelTargets(), row.nodeName, row.nodeKind, centroid.scenePosition)
+                        } else {
                             DragState.finish()
+                        }
                     }
                     onCentroidChanged: if (active) DragState.update(centroid.scenePosition)
                 }
@@ -667,12 +882,12 @@ Item {
                     }
                 }
 
-                // Every row accepts drops: edges reorder among the siblings, the middle
-                // of a folder moves into it.
+                // Every row accepts drops (Organize only): edges reorder among the siblings,
+                // the middle of a folder moves into it.
                 DropArea {
                     id: rowDrop
                     anchors.fill: parent
-                    enabled: DragState.active && !DragState.contains(row.nodeId)
+                    enabled: DragState.active && !Session.working && !DragState.contains(row.nodeId)
                     onDropped: function(drop) { row.dropAt(drop.y) }
                 }
             }

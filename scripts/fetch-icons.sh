@@ -119,6 +119,7 @@ fluent:cloud-arrow-down-20-regular
 fluent:info-20-regular
 fluent:error-circle-20-regular
 fluent:arrow-undo-20-regular
+fluent:dismiss-square-multiple-20-regular
 "
 
 for icon in $ICONS; do

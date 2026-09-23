@@ -276,6 +276,22 @@ void TabsModel::closeOthers(int index)
     }
 }
 
+void TabsModel::closeBefore(int index)
+{
+    if (index < 0 || index >= m_tabs.size())
+        return;
+    for (int i = index - 1; i >= 0; --i)
+        closeTab(i);
+}
+
+void TabsModel::closeAfter(int index)
+{
+    if (index < 0 || index >= m_tabs.size())
+        return;
+    for (int i = int(m_tabs.size()) - 1; i > index; --i)
+        closeTab(i);
+}
+
 void TabsModel::closeAll()
 {
     for (int i = int(m_tabs.size()) - 1; i >= 0; --i)
