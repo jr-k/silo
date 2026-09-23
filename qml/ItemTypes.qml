@@ -96,6 +96,17 @@ QtObject {
         return u.replace(/^https?:\/\//, "").split("/")[0]
     }
 
+    // ------------------------------------------------------------------ web
+    // Web address as typed by the user: "example.com/x" or "localhost:8080" get an
+    // https:// scheme, anything with an explicit scheme is kept as is.
+    function normalizeWebUrl(text) {
+        var u = String(text || "").trim()
+        if (u.length === 0)
+            return ""
+        var hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(u) || /^(about|data|mailto|javascript):/i.test(u)
+        return hasScheme ? u : "https://" + u
+    }
+
     // ------------------------------------------------------------------ ssh
     function parseSsh(url) {
         var result = { user: "", host: "", port: 22 }

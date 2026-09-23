@@ -46,7 +46,7 @@ SiloDialog {
             return ItemTypes.buildSsh(userField.text, hostField.text, portField.text)
         if (isFile)
             return files.expand(pathField.text)
-        return urlField.text.trim()
+        return ItemTypes.normalizeWebUrl(urlField.text)
     }
 
     function resetFields() {
@@ -193,7 +193,7 @@ SiloDialog {
                     id: previewDebounce
                     interval: 500
                     onTriggered: previewFavicon.url = /^(https?:\/\/)?[^\s.]+\.[^\s]+$/.test(urlField.text.trim())
-                                                      ? urlField.text.trim() : ""
+                                                      ? ItemTypes.normalizeWebUrl(urlField.text) : ""
                 }
                 // Default ssh / file icon: typed glyph following the target
                 ItemIcon {
