@@ -66,6 +66,24 @@ Item {
         }
     }
 
+    // A press anywhere but on a tree row drops the selection (the rows handle their
+    // own clicks). Presses in the tree's context menus are left alone: their items
+    // act on the selection when triggered.
+    Connections {
+        target: windowEvents
+        function onPressed(x, y) {
+            if (sidebar.selectedIds.length === 0)
+                return
+            if (folderMenu.visible || itemMenu.visible || liveFolderMenu.visible || liveItemMenu.visible)
+                return
+            var p = tree.mapFromItem(null, x, y)
+            if (p.x >= 0 && p.y >= 0 && p.x < tree.width && p.y < tree.height
+                    && tree.itemAt(p.x + tree.contentX, p.y + tree.contentY))
+                return
+            sidebar.clearSelection()
+        }
+    }
+
     // ---- selection ------------------------------------------------------------
     function isSelected(id) {
         return selectedIds.indexOf(id) >= 0
@@ -283,12 +301,13 @@ Item {
     }
 
     // Live only: opens every selected leaf in a tab; `preferredId` is the row that was
-    // activated and becomes the current tab. With nothing to open, a folder under the
-    // cursor folds / unfolds instead.
-    function openSelection(preferredId) {
+    // activated and becomes the current tab. `groupIds` overrides the selection (a
+    // double-click on a group the first click just collapsed). With nothing to open,
+    // a folder under the cursor folds / unfolds instead.
+    function openSelection(preferredId, groupIds) {
         if (!Session.working)
             return
-        var ids = targetIds()
+        var ids = groupIds && groupIds.length > 0 ? groupIds : targetIds()
         if (ids.length === 0 && preferredId)
             ids = [preferredId]
         var items = []
@@ -339,6 +358,7 @@ Item {
         id: folderMenu
         property string targetId: ""
         property string targetName: ""
+        onAboutToShow: appStore.refreshClipboardState()
         SiloMenuItem {
             text: "Open"
             iconName: "fluent-folder-open-20-regular"
@@ -613,14 +633,15 @@ Item {
                         appStore.moveNodesRelative(DragState.ids, nodeId, zone === "after")
                 }
 
-                // Plain click: select the row (folders also navigate in Organize mode). A row
-                // that is part of a multi-selection keeps it until the double-click window has
-                // passed, so a double-click can act on the whole selection.
+                // Multi-selection this row belonged to when it was last plain-clicked. The
+                // click collapses the group right away; a double-click (whose first tap is
+                // that click) can still open the whole group in Live mode.
+                property var groupBeforeClick: []
+
+                // Plain click: select just this row (folders also navigate in Organize mode).
                 function click() {
-                    if (selected && sidebar.selectedIds.length > 1)
-                        reduceTimer.restart()
-                    else
-                        sidebar.selectOnly(nodeId)
+                    groupBeforeClick = selected && sidebar.selectedIds.length > 1 ? sidebar.selectedIds : []
+                    sidebar.selectOnly(nodeId)
                     if (!Session.working && isFolder)
                         appStore.openFolder(nodeId)
                 }
@@ -628,21 +649,16 @@ Item {
                 // Double-click: Live opens the selected items in tabs, Organize opens the item's
                 // edit dialog; folders fold / unfold.
                 function open() {
-                    reduceTimer.stop()
+                    var group = groupBeforeClick
+                    groupBeforeClick = []
                     if (Session.working)
-                        sidebar.openSelection(nodeId)
+                        sidebar.openSelection(nodeId, group)
                     else if (isFolder) {
                         if (hasChildren)
                             appStore.toggleExpanded(nodeId)
                     } else {
                         sidebarItemDialog.openForEdit(nodeId)
                     }
-                }
-
-                Timer {
-                    id: reduceTimer
-                    interval: Application.styleHints.mouseDoubleClickInterval
-                    onTriggered: sidebar.selectOnly(row.nodeId)
                 }
 
                 width: tree.width
@@ -823,7 +839,6 @@ Item {
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: {
-                        reduceTimer.stop()
                         if (row.selected)
                             sidebar.focusNode(row.nodeId)
                         else
@@ -844,7 +859,6 @@ Item {
                     enabled: row.canDrag
                     onActiveChanged: {
                         if (active) {
-                            reduceTimer.stop()
                             if (!row.selected)
                                 sidebar.selectOnly(row.nodeId)
                             DragState.begin(sidebar.topLevelTargets(), row.nodeName, row.nodeKind, centroid.scenePosition)

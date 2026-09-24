@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 
 // Live-mode layout persisted next to the library (<data dir>/session.json):
@@ -23,6 +24,10 @@ public:
     QJsonObject tabs(const QString &workspaceId) const;
     void setTabs(const QString &workspaceId, const QStringList &ids, int current, bool manualOrder);
     void forgetTabs(const QString &workspaceId);
+
+    QStringList expandedFolders(const QString &workspaceId) const;
+    void setExpandedFolders(const QString &workspaceId, const QStringList &ids);
+    void forgetExpandedFolders(const QString &workspaceId);
 
     static QString filePath();
 

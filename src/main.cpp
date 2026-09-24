@@ -75,6 +75,7 @@ void installQuitSignals(QObject *parent)
 #include "PasswordManager.h"
 #include "Vault.h"
 #include "ThemeController.h"
+#include "WindowEvents.h"
 
 // SSH_ASKPASS helper used by TerminalSession for password logins: ssh runs
 // `Silo --askpass "<prompt>"` and reads our stdout. Host-key confirmations are
@@ -115,11 +116,12 @@ int main(int argc, char *argv[])
     ThemeController themeController;
     PasswordManager passwordManager;
     Vault vault;
-    AppStore store;
     SessionStore sessionStore;
+    AppStore store(&sessionStore);
     TabsHub tabsHub(&store, &sessionStore);
     FaviconFetcher faviconFetcher;
     FileInspector fileInspector;
+    WindowEvents windowEvents;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
     engine.addImageProvider(QStringLiteral("siteicon"), new FaviconProvider(&faviconFetcher));
@@ -130,6 +132,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("tabsHub"), &tabsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("files"), &fileInspector);
     engine.rootContext()->setContextProperty(QStringLiteral("sessionStore"), &sessionStore);
+    engine.rootContext()->setContextProperty(QStringLiteral("windowEvents"), &windowEvents);
     // Read-only facts for Settings > About.
     const QVariantMap appInfo{
         {QStringLiteral("version"), QGuiApplication::applicationVersion()},
@@ -147,6 +150,7 @@ int main(int argc, char *argv[])
         return -1;
 
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    windowEvents.watch(window);
 
     // Dev aid: SILO_DEBUG_EVAL="<js>" runs in Main.qml's context shortly after startup.
     const QByteArray debugEval = qgetenv("SILO_DEBUG_EVAL");
@@ -193,7 +197,7 @@ int main(int argc, char *argv[])
             const QPointF pos(parts[0].trimmed().toDouble(), parts[1].trimmed().toDouble());
             const QPointF global = window->mapToGlobal(pos);
             QMouseEvent press(QEvent::MouseButtonPress, pos, pos, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-            QMouseEvent release(QEvent::MouseButtonRelease, pos, pos, global, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, pos, pos, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
             QCoreApplication::sendEvent(window, &press);
             QCoreApplication::sendEvent(window, &release);
         });

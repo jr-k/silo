@@ -42,25 +42,18 @@ QtObject {
         settingsRequested(section || "general")
     }
 
-    // Internal clipboard for folders / items (ids of the current workspace).
-    property var clipboardIds: []
-    property string clipboardWorkspaceId: ""
-    readonly property bool canPaste: clipboardIds.length > 0 && clipboardWorkspaceId === appStore.currentWorkspaceId
+    // Folders / items go through the system clipboard as JSON (see AppStore::copyToClipboard),
+    // so they paste across workspaces, across Silo instances, or from a hand-written payload.
+    readonly property bool canPaste: appStore.clipboardHasNodes
 
     function copy(ids) {
-        if (!ids || ids.length === 0)
-            return
-        clipboardIds = ids.slice()
-        clipboardWorkspaceId = appStore.currentWorkspaceId
+        if (ids && ids.length > 0)
+            appStore.copyToClipboard(ids)
     }
 
-    // Deep-copies the clipboard into the folder (empty id = workspace root); returns the new ids.
+    // Deep-copies the clipboard into the folder (empty id = workspace root); returns the new
+    // ids. Reads the clipboard directly: canPaste may lag behind an external change.
     function pasteInto(folderId) {
-        if (!canPaste)
-            return []
-        var created = appStore.copyNodes(clipboardIds, folderId)
-        // Drop ids that no longer exist so a later paste doesn't silently shrink.
-        clipboardIds = clipboardIds.filter(function(id) { return !!appStore.nodeInfo(id).id })
-        return created
+        return appStore.pasteFromClipboard(folderId)
     }
 }

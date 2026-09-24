@@ -1,12 +1,15 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QSet>
 #include <QVariantList>
 
 #include <memory>
+
+class SessionStore;
 
 struct SiloNode {
     QString id;
@@ -113,9 +116,11 @@ class AppStore final : public QObject
     Q_PROPERTY(QString currentFolderName READ currentFolderName NOTIFY breadcrumbsChanged)
     Q_PROPERTY(QVariantList breadcrumbs READ breadcrumbs NOTIFY breadcrumbsChanged)
     Q_PROPERTY(int revision READ revision NOTIFY dataChanged)
+    // True while the system clipboard holds a pasteable node payload (see copyToClipboard).
+    Q_PROPERTY(bool clipboardHasNodes READ clipboardHasNodes NOTIFY clipboardChanged)
 
 public:
-    explicit AppStore(QObject *parent = nullptr);
+    explicit AppStore(SessionStore *session, QObject *parent = nullptr);
 
     QAbstractItemModel *workspaceModel() { return &m_workspaceModel; }
     QAbstractItemModel *treeModel() { return &m_treeModel; }
@@ -179,9 +184,23 @@ public:
     // Leaf item ids of a workspace in tree (depth-first) order; used to keep the
     // Live tabs in the same order as the sidebar.
     QStringList itemOrder(const QString &workspaceId) const;
-    // Deep-copies the nodes (folders with their whole subtree) into the destination
-    // folder (empty id = workspace root). Returns the ids of the new top-level copies.
-    Q_INVOKABLE QVariantList copyNodes(const QVariantList &ids, const QString &destinationId);
+    // System clipboard. copyToClipboard() puts the nodes of the current workspace
+    // (folders with their subtree, image icons embedded as data: URLs) on the
+    // clipboard as text:
+    //   {"format": "silo-nodes", "version": 1, "nodes": [<node>…]}
+    // where <node> follows the library / workspace-file schema. pasteFromClipboard()
+    // deep-copies such a payload — or the roots of an exported workspace file — into
+    // the destination folder of the current workspace (empty id = root) with fresh
+    // ids and returns the ids of the new top-level copies. Any JSON in that shape
+    // can be pasted, so a hand-written list of items imports just as well.
+    // SSH passwords never travel through the clipboard: a copy made from this
+    // library gets them back through the original ids when pasted here.
+    bool clipboardHasNodes() const { return m_clipboardHasNodes; }
+    // Re-reads the clipboard. macOS only reports external changes when the app comes
+    // back to the front, so menus offering "Paste" call this as they open.
+    Q_INVOKABLE void refreshClipboardState();
+    Q_INVOKABLE void copyToClipboard(const QVariantList &ids);
+    Q_INVOKABLE QVariantList pasteFromClipboard(const QString &destinationId);
 
     // Per-node secrets (ssh passwords), kept out of library.json in a 0600 secrets.json.
     Q_INVOKABLE QString secret(const QString &id) const;
@@ -209,6 +228,7 @@ signals:
     void currentFolderChanged();
     void breadcrumbsChanged();
     void dataChanged();
+    void clipboardChanged();
 
 private:
     using NodePtr = std::shared_ptr<SiloNode>;
@@ -220,7 +240,9 @@ private:
     QString m_currentWorkspaceId;
     QString m_currentFolderId;
     QSet<QString> m_expandedIds;
+    SessionStore *m_session = nullptr;
     int m_revision = 0;
+    bool m_clipboardHasNodes = false;
 
     SiloWorkspace *currentWorkspace();
     const SiloWorkspace *currentWorkspace() const;
@@ -236,10 +258,23 @@ private:
     // Validates a move of `ids` into `destinationId` and returns the nodes to
     // move, deduplicated and sorted by their current tree order. Empty if invalid.
     QList<QString> movableNodes(const QVariantList &ids, const QString &destinationId, NodePtr &destination);
+    // Nodes of the current workspace for `ids`, in the given order, without duplicates
+    // and without nodes whose ancestor is listed too (it brings them along anyway).
+    QList<NodePtr> topLevelNodes(const QVariantList &ids) const;
+    // Appends fresh-id deep copies of `sources` to the destination folder of the
+    // current workspace ("Name copy" on a name clash). Passwords come from `secrets`
+    // (exported workspace payload) or from this library, keyed by the source ids.
+    QVariantList insertCopies(const QList<NodePtr> &sources, const QString &destinationId,
+                              const QJsonObject &secrets);
+    // Reads a clipboard / workspace-file payload; false when the text is neither.
+    static bool parseClipboardNodes(const QString &text, QJsonArray &nodes, QJsonObject &secrets);
     void appendTreeRows(const QList<NodePtr> &nodes, int depth, QList<TreeModel::Row> &rows) const;
     void rebuildModels();
     void load();
     void save() const;
+    void loadExpandedState();
+    void saveExpandedState() const;
+    void expandFolder(const QString &id);
     QString storagePath() const;
     void loadSecrets() const;
     void saveSecrets() const;
@@ -248,6 +283,8 @@ private:
     mutable QHash<QString, QString> m_secrets;
     mutable bool m_secretsLoaded = false;
     static QJsonObject nodeToJson(const NodePtr &node);
+    // nodeToJson with image icons embedded as data: URLs (clipboard, workspace files).
+    static QJsonObject nodeToTransferJson(const NodePtr &node);
     static NodePtr nodeFromJson(const QJsonObject &object);
 
     // Transfer helpers

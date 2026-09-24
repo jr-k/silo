@@ -13,8 +13,8 @@ Item {
     readonly property var impl: loader.item
     readonly property string kind: tabType
     readonly property bool loading: impl ? !!impl.loading : false
-    readonly property bool canGoBack: impl ? !!impl.canGoBack : false
-    readonly property bool canGoForward: impl ? !!impl.canGoForward : false
+    readonly property bool canGoBack: impl ? (kind === "web" ? !!impl.effectiveCanGoBack : !!impl.canGoBack) : false
+    readonly property bool canGoForward: impl ? (kind === "web" ? !!impl.effectiveCanGoForward : !!impl.canGoForward) : false
     readonly property int loadProgress: impl ? impl.loadProgress : 0
     readonly property string displayUrl: impl ? impl.displayUrl : tabUrl
     // Favicon reported by the browser page (web only)
@@ -29,8 +29,8 @@ Item {
     }
     function reload() { if (impl) impl.reload() }
     function stop() { if (impl) impl.stop() }
-    function goBack() { if (impl) impl.goBack() }
-    function goForward() { if (impl) impl.goForward() }
+    function goBack() { if (impl) kind === "web" ? impl.historyBack() : impl.goBack() }
+    function goForward() { if (impl) kind === "web" ? impl.historyForward() : impl.goForward() }
     function openExternally() { if (impl) impl.openExternally() }
     function showInFolder() { if (impl && impl.showInFolder) impl.showInFolder() }
     // Web tabs only: fill the page's login form (see WebPage.fillCredentials)

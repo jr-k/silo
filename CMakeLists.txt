@@ -38,6 +38,8 @@ qt_add_executable(Silo
     src/FileInspector.h
     src/CsvModel.cpp
     src/CsvModel.h
+    src/WindowEvents.cpp
+    src/WindowEvents.h
 )
 
 if(APPLE)

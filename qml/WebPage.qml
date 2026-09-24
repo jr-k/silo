@@ -8,9 +8,51 @@ WebEngineView {
     property string tabUrl: ""
     // Set by ensureLoaded(), which the tab container calls as soon as the page exists.
     property bool loaded: false
+    property var popupBackHistory: []
+    property var popupForwardHistory: []
+    property bool replacingFromPopupHistory: false
 
     readonly property string kind: "web"
     readonly property string displayUrl: String(url)
+    readonly property bool effectiveCanGoBack: canGoBack || popupBackHistory.length > 0
+    readonly property bool effectiveCanGoForward: canGoForward || popupForwardHistory.length > 0
+
+    function replaceFromPopupHistory(targetUrl) {
+        replacingFromPopupHistory = true
+        runJavaScript("location.replace(" + JSON.stringify(targetUrl) + ")")
+    }
+
+    function historyBack() {
+        if (canGoBack) {
+            goBack()
+            return
+        }
+        if (popupBackHistory.length === 0)
+            return
+        var back = popupBackHistory.slice()
+        var targetUrl = back.pop()
+        var forward = popupForwardHistory.slice()
+        forward.push(String(url))
+        popupBackHistory = back
+        popupForwardHistory = forward
+        replaceFromPopupHistory(targetUrl)
+    }
+
+    function historyForward() {
+        if (canGoForward) {
+            goForward()
+            return
+        }
+        if (popupForwardHistory.length === 0)
+            return
+        var forward = popupForwardHistory.slice()
+        var targetUrl = forward.pop()
+        var back = popupBackHistory.slice()
+        back.push(String(url))
+        popupForwardHistory = forward
+        popupBackHistory = back
+        replaceFromPopupHistory(targetUrl)
+    }
 
     profile: WebProfile
 
@@ -54,7 +96,14 @@ WebEngineView {
         registeredObjects: [captureBridge]
     }
     // A capture is only relevant for a while: drop it on the next site change.
-    onUrlChanged: if (pendingCapture && vault.hostOf(String(url)) !== pendingCapture.host) pendingCapture = null
+    onUrlChanged: {
+        if (pendingCapture && vault.hostOf(String(url)) !== pendingCapture.host)
+            pendingCapture = null
+        if (replacingFromPopupHistory)
+            replacingFromPopupHistory = false
+        else if (popupForwardHistory.length > 0)
+            popupForwardHistory = []
+    }
 
     // 2FA code armed by a login fill, typed into the one-time-code field as
     // soon as one shows up (same page or the next step), for two minutes.
@@ -240,7 +289,15 @@ WebEngineView {
     onTabUrlChanged: if (loaded) url = tabUrl
 
     onNewWindowRequested: function(request) {
-        // Popups (OAuth, target=_blank) stay in this tab for now.
+        // Popups (OAuth, target=_blank) stay in this tab. Adopting their
+        // WebContents resets Qt's native history, so remember the opener.
+        var currentUrl = String(url)
+        if (currentUrl.length > 0) {
+            var back = popupBackHistory.slice()
+            back.push(currentUrl)
+            popupBackHistory = back
+            popupForwardHistory = []
+        }
         request.openIn(this)
     }
 }

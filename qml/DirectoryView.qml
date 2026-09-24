@@ -214,6 +214,7 @@ Item {
     SiloMenu {
         id: folderTileMenu
         property string targetId: ""
+        onAboutToShow: appStore.refreshClipboardState()
         SiloMenuItem {
             text: "Open"
             iconName: "fluent-folder-open-20-regular"
@@ -339,6 +340,7 @@ Item {
 
     SiloMenu {
         id: backgroundMenu
+        onAboutToShow: appStore.refreshClipboardState()
         Repeater {
             model: ItemTypes.all
             SiloMenuItem {

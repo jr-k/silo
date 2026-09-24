@@ -1,10 +1,13 @@
 #include "AppStore.h"
+#include "SessionStore.h"
 
+#include <QClipboard>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMimeDatabase>
@@ -19,6 +22,10 @@
 namespace {
 const auto kTransferFormat = QStringLiteral("silo-workspace");
 constexpr int kTransferVersion = 1;
+const auto kClipboardFormat = QStringLiteral("silo-nodes");
+constexpr int kClipboardVersion = 1;
+// Clipboard text beyond this is not ours: don't even try to parse it.
+constexpr qsizetype kMaxClipboardChars = 64 * 1024 * 1024;
 constexpr qint64 kMaxEmbeddedIconBytes = 2 * 1024 * 1024;
 
 QString localPathOf(const QUrl &url)
@@ -205,11 +212,23 @@ void DirectoryModel::refreshNode(const QString &id)
     }
 }
 
-AppStore::AppStore(QObject *parent)
-    : QObject(parent), m_workspaceModel(this), m_treeModel(this), m_directoryModel(this)
+AppStore::AppStore(SessionStore *session, QObject *parent)
+    : QObject(parent), m_workspaceModel(this), m_treeModel(this), m_directoryModel(this),
+      m_session(session)
 {
     load();
+    loadExpandedState();
     rebuildModels();
+
+    if (auto *clipboard = QGuiApplication::clipboard()) {
+        connect(clipboard, &QClipboard::dataChanged, this, &AppStore::refreshClipboardState);
+        // macOS reports pasteboard changes lazily: re-check when the app comes to the front.
+        connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+            if (state == Qt::ApplicationActive)
+                refreshClipboardState();
+        });
+        refreshClipboardState();
+    }
 }
 
 QString AppStore::currentWorkspaceName() const
@@ -384,7 +403,7 @@ void AppStore::selectWorkspace(const QString &id)
         return;
     m_currentWorkspaceId = id;
     m_currentFolderId.clear();
-    m_expandedIds.clear();
+    loadExpandedState();
     QSettings().setValue(QStringLiteral("currentWorkspaceId"), id);
     rebuildModels();
     emit currentWorkspaceChanged();
@@ -411,6 +430,7 @@ void AppStore::adoptWorkspace(SiloWorkspace workspace)
     m_workspaces.append(std::move(workspace));
     m_currentFolderId.clear();
     m_expandedIds.clear();
+    saveExpandedState();
     QSettings().setValue(QStringLiteral("currentWorkspaceId"), m_currentWorkspaceId);
     save();
     rebuildModels();
@@ -452,10 +472,12 @@ void AppStore::deleteWorkspace(const QString &id)
     if (found == m_workspaces.end())
         return;
     m_workspaces.erase(found);
+    if (m_session)
+        m_session->forgetExpandedFolders(id);
     if (id == m_currentWorkspaceId) {
         m_currentWorkspaceId = m_workspaces.first().id;
         m_currentFolderId.clear();
-        m_expandedIds.clear();
+        loadExpandedState();
         QSettings().setValue(QStringLiteral("currentWorkspaceId"), m_currentWorkspaceId);
     }
     save();
@@ -472,7 +494,7 @@ void AppStore::openFolder(const QString &id)
         const auto node = findNode(id);
         if (!node || !node->folder)
             return;
-        m_expandedIds.insert(id);
+        expandFolder(id);
     }
     m_currentFolderId = id;
     rebuildModels();
@@ -494,6 +516,7 @@ void AppStore::toggleExpanded(const QString &id)
         m_expandedIds.remove(id);
     else
         m_expandedIds.insert(id);
+    saveExpandedState();
     rebuildModels();
 }
 
@@ -627,18 +650,107 @@ void AppStore::deleteNodes(const QVariantList &ids)
         remove(workspace->roots);
     if (idSet.contains(m_currentFolderId) || (!m_currentFolderId.isEmpty() && !findNode(m_currentFolderId)))
         m_currentFolderId.clear();
-    for (const auto &id : idSet)
-        m_expandedIds.remove(id);
+    for (auto it = m_expandedIds.begin(); it != m_expandedIds.end();) {
+        if (!findNode(*it))
+            it = m_expandedIds.erase(it);
+        else
+            ++it;
+    }
+    saveExpandedState();
     save();
     rebuildModels();
     emit currentFolderChanged();
     emit breadcrumbsChanged();
 }
 
-QVariantList AppStore::copyNodes(const QVariantList &ids, const QString &destinationId)
+QList<AppStore::NodePtr> AppStore::topLevelNodes(const QVariantList &ids) const
+{
+    QList<NodePtr> nodes;
+    for (const auto &value : ids) {
+        const auto node = findNode(value.toString());
+        if (!node)
+            continue;
+        bool covered = false;
+        for (const auto &other : nodes) {
+            if (other == node || contains(other, node->id)) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered)
+            nodes.append(node);
+    }
+    return nodes;
+}
+
+void AppStore::copyToClipboard(const QVariantList &ids)
+{
+    const QList<NodePtr> sources = topLevelNodes(ids);
+    if (sources.isEmpty())
+        return;
+    QJsonArray nodes;
+    for (const auto &node : sources)
+        nodes.append(nodeToTransferJson(node));
+    const QJsonObject payload{{QStringLiteral("format"), kClipboardFormat},
+                              {QStringLiteral("version"), kClipboardVersion},
+                              {QStringLiteral("nodes"), nodes}};
+    QGuiApplication::clipboard()->setText(
+        QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Indented)));
+    refreshClipboardState();
+}
+
+QVariantList AppStore::pasteFromClipboard(const QString &destinationId)
+{
+    QJsonArray nodes;
+    QJsonObject secrets;
+    if (!parseClipboardNodes(QGuiApplication::clipboard()->text(), nodes, secrets))
+        return {};
+    QList<NodePtr> sources;
+    for (const auto &value : nodes) {
+        if (value.isObject())
+            sources.append(nodeFromJson(value.toObject()));
+    }
+    return insertCopies(sources, destinationId, secrets);
+}
+
+bool AppStore::parseClipboardNodes(const QString &text, QJsonArray &nodes, QJsonObject &secrets)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty() || trimmed.size() > kMaxClipboardChars || !trimmed.startsWith(QLatin1Char('{')))
+        return false;
+    const QJsonObject document = QJsonDocument::fromJson(trimmed.toUtf8()).object();
+    const QString format = document.value(QStringLiteral("format")).toString();
+    if (format == kClipboardFormat) {
+        if (document.value(QStringLiteral("version")).toInt(1) > kClipboardVersion)
+            return false;
+        nodes = document.value(QStringLiteral("nodes")).toArray();
+    } else if (format == kTransferFormat) {
+        if (document.value(QStringLiteral("version")).toInt(1) > kTransferVersion)
+            return false;
+        nodes = document.value(QStringLiteral("workspace")).toObject().value(QStringLiteral("roots")).toArray();
+        secrets = document.value(QStringLiteral("secrets")).toObject();
+    } else {
+        return false;
+    }
+    return !nodes.isEmpty();
+}
+
+void AppStore::refreshClipboardState()
+{
+    QJsonArray nodes;
+    QJsonObject secrets;
+    const bool has = parseClipboardNodes(QGuiApplication::clipboard()->text(), nodes, secrets);
+    if (has == m_clipboardHasNodes)
+        return;
+    m_clipboardHasNodes = has;
+    emit clipboardChanged();
+}
+
+QVariantList AppStore::insertCopies(const QList<NodePtr> &sources, const QString &destinationId,
+                                    const QJsonObject &secrets)
 {
     auto *workspace = currentWorkspace();
-    if (!workspace)
+    if (!workspace || sources.isEmpty())
         return {};
     NodePtr destination;
     if (!destinationId.isEmpty()) {
@@ -648,30 +760,26 @@ QVariantList AppStore::copyNodes(const QVariantList &ids, const QString &destina
     }
     auto *target = destination ? &destination->children : &workspace->roots;
 
-    // Keep order, drop duplicates and nodes already covered by a copied ancestor.
-    QList<NodePtr> sources;
-    for (const auto &value : ids) {
-        const auto node = findNode(value.toString());
-        if (!node)
-            continue;
-        bool covered = false;
-        for (const auto &other : sources) {
-            if (other == node || contains(other, node->id)) {
-                covered = true;
-                break;
-            }
-        }
-        if (!covered)
-            sources.append(node);
-    }
-    if (sources.isEmpty())
-        return {};
-
+    loadSecrets();
+    bool secretsTouched = false;
     std::function<NodePtr(const NodePtr &)> clone = [&](const NodePtr &source) {
         auto copy = std::make_shared<SiloNode>(*source);
         copy->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (const QString password = secret(source->id); !password.isEmpty())
+        // Hand-written payloads may leave these out.
+        if (copy->type.isEmpty())
+            copy->type = QStringLiteral("web");
+        if (copy->name.trimmed().isEmpty())
+            copy->name = copy->folder ? QStringLiteral("New folder")
+                       : copy->url.isEmpty() ? QStringLiteral("Untitled") : copy->url;
+        if (copy->iconType == QStringLiteral("image"))
+            copy->iconValue = materializeIcon(copy->iconValue);
+        QString password = secrets.value(source->id).toString();
+        if (password.isEmpty())
+            password = m_secrets.value(source->id);
+        if (!password.isEmpty()) {
             m_secrets.insert(copy->id, password);
+            secretsTouched = true;
+        }
         copy->children.clear();
         for (const auto &child : source->children)
             copy->children.append(clone(child));
@@ -700,9 +808,10 @@ QVariantList AppStore::copyNodes(const QVariantList &ids, const QString &destina
         created.append(copy->id);
     }
     if (destination)
-        m_expandedIds.insert(destination->id);
+        expandFolder(destination->id);
     save();
-    saveSecrets();
+    if (secretsTouched)
+        saveSecrets();
     rebuildModels();
     return created;
 }
@@ -773,7 +882,7 @@ void AppStore::moveNodes(const QVariantList &ids, const QString &destinationId)
     auto *target = destination ? &destination->children : &workspace->roots;
     target->append(moved);
     if (destination)
-        m_expandedIds.insert(destination->id);
+        expandFolder(destination->id);
     save();
     rebuildModels();
 }
@@ -848,7 +957,7 @@ void AppStore::insertNodes(const QVariantList &ids, const QString &destinationId
         target->insert(position + k, moved.at(k));
 
     if (destination)
-        m_expandedIds.insert(destination->id);
+        expandFolder(destination->id);
     save();
     rebuildModels();
 }
@@ -1020,6 +1129,38 @@ void AppStore::rebuildModels()
     }
     ++m_revision;
     emit dataChanged();
+}
+
+void AppStore::loadExpandedState()
+{
+    m_expandedIds.clear();
+    if (!m_session || m_currentWorkspaceId.isEmpty())
+        return;
+    const QStringList saved = m_session->expandedFolders(m_currentWorkspaceId);
+    for (const auto &id : saved) {
+        const auto node = findNode(id);
+        if (node && node->folder)
+            m_expandedIds.insert(id);
+    }
+    if (m_expandedIds.size() != saved.size())
+        saveExpandedState();
+}
+
+void AppStore::saveExpandedState() const
+{
+    if (!m_session || m_currentWorkspaceId.isEmpty())
+        return;
+    QStringList ids(m_expandedIds.begin(), m_expandedIds.end());
+    ids.sort();
+    m_session->setExpandedFolders(m_currentWorkspaceId, ids);
+}
+
+void AppStore::expandFolder(const QString &id)
+{
+    if (id.isEmpty() || m_expandedIds.contains(id))
+        return;
+    m_expandedIds.insert(id);
+    saveExpandedState();
 }
 
 QString AppStore::dataDirectory()
@@ -1270,23 +1411,25 @@ QString AppStore::materializeIcon(const QString &value)
     return QUrl::fromLocalFile(path).toString();
 }
 
+QJsonObject AppStore::nodeToTransferJson(const NodePtr &node)
+{
+    QJsonObject object = nodeToJson(node);
+    if (node->iconType == QStringLiteral("image"))
+        object.insert(QStringLiteral("iconValue"), embedIcon(node->iconValue));
+    if (!node->children.isEmpty()) {
+        QJsonArray children;
+        for (const auto &child : node->children)
+            children.append(nodeToTransferJson(child));
+        object.insert(QStringLiteral("children"), children);
+    }
+    return object;
+}
+
 QJsonObject AppStore::workspaceToJson(const SiloWorkspace &workspace)
 {
-    std::function<QJsonObject(const NodePtr &)> convert = [&](const NodePtr &node) {
-        QJsonObject object = nodeToJson(node);
-        if (node->iconType == QStringLiteral("image"))
-            object.insert(QStringLiteral("iconValue"), embedIcon(node->iconValue));
-        if (!node->children.isEmpty()) {
-            QJsonArray children;
-            for (const auto &child : node->children)
-                children.append(convert(child));
-            object.insert(QStringLiteral("children"), children);
-        }
-        return object;
-    };
     QJsonArray roots;
     for (const auto &node : workspace.roots)
-        roots.append(convert(node));
+        roots.append(nodeToTransferJson(node));
     return QJsonObject{
         {QStringLiteral("name"), workspace.name},
         {QStringLiteral("color"), workspace.color},
